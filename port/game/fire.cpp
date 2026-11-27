@@ -291,7 +291,7 @@ void Fires::process(Game& g) {
                 g.peds.fireHit(g, p, 1, f.byPlayer ? g.player.pos : from);
                 if (p.body.dead || p.deadFrames >= 0) {
                     f.out = true;
-                    if (f.byPlayer) Stats_PedKilledByPlayer(g, subtype);   // cPed::HandlePreDead: the fire's owner
+                    if (f.byPlayer) Stats_PedKilledByPlayer(g, subtype, p.type);   // cPed::HandlePreDead: the fire's owner
                 }
                 break;
             }

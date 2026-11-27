@@ -604,7 +604,7 @@ void Pedestrians::runOver(Game& g, Ped& p) {
         if (!wasDead && p.body.dead) {
             TheSound().pedDeath(p.body.pos, p.male, false);
             // cPed::HandlePreDead: a kill by the player's vehicle counts as the player's
-            if (g.playerCar >= 0 && &v == &g.cars[g.playerCar]) Stats_PedKilledByPlayer(g, p.subtype);
+            if (g.playerCar >= 0 && &v == &g.cars[g.playerCar]) Stats_PedKilledByPlayer(g, p.subtype, p.type);
         }
     }
 }
@@ -734,7 +734,8 @@ void Pedestrians::react(Game& g, Ped& p, int action, const int32_t from[3], uint
 }
 
 // cPed::Damage's switch on sDamageInfo type: how many times it calls cGeneralParticleController::AddBlood.
-// 3 (taser), 4, 5 and 13 bleed nothing; 12 (chainsaw) starts a cParticleEmitterBloodSpray, which is not ported.
+// 3 (taser), 4, 5, 12 and 13 bleed nothing. The chainsaw (12) would use cParticleEmitterBloodSpray, but that
+// emitter is never constructed in the Android build (dead code), so type 12 makes no blood particles here.
 static int bloodDrops(int type, int damage, int effect) {
     switch (type) {
         case 0: return effect == 0x1D ? 0 : 4;
@@ -764,7 +765,7 @@ void Pedestrians::meleeHit(Game& g, Ped& p, int damage, int type, const int32_t 
         p.deadFrames = 0;
         p.rollFrames = -1;
         TheSound().pedDeath(p.body.pos, p.male, false);
-        if (fromPlayer) Stats_PedKilledByPlayer(g, p.subtype);   // cPed::HandlePreDead
+        if (fromPlayer) Stats_PedKilledByPlayer(g, p.subtype, p.type);   // cPed::HandlePreDead
         if (type == 0) Rand32Critical(100);
         if (fromPlayer) Stats_PlayerDamage(g, 0, type, effect);
         Plugins_EmitEvent(CTW_EVENT_PED_KNOCKED_DOWN, 0, -1, (int)p.uid);
@@ -796,7 +797,7 @@ void Pedestrians::bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], i
         p.deadFrames = 0;
         p.rollFrames = -1;
         TheSound().pedDeath(p.body.pos, p.male, false);   // cPed::SetDead -> PlayDeathSound
-        if (fromPlayer) Stats_PedKilledByPlayer(g, p.subtype);           // cPed::HandlePreDead
+        if (fromPlayer) Stats_PedKilledByPlayer(g, p.subtype, p.type);   // cPed::HandlePreDead
         if (fromPlayer) Stats_PlayerDamage(g, 0, type, effect);
         Plugins_EmitEvent(CTW_EVENT_PED_KNOCKED_DOWN, 0, -1, (int)p.uid);
         return;

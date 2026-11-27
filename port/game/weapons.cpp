@@ -606,8 +606,13 @@ void createBullet(Game& g, Weapon& w, Player* shooter = nullptr, uint32_t uid = 
 // cNiteStick::GetDamageEffect / cChainsaw::GetDamageEffect
 int damageEffect(const Weapon& w, const Player& attacker, const Player& victim, int64_t range2) {
     if (w.type == 1 && victim.health > 20) return 0;   // cNiteStick::GetDamageEffect: knockdown only at <= 20 health
-    if (w.type == 4) {   // cChainsaw::GetDamageEffect: effect 1 beyond range, else the base effect. The in-range
-                         // blood spray (a per-victim cParticleEmitterBloodSpray) and its 60-hit cap are not reproduced.
+    if (w.type == 4) {   // cChainsaw::GetDamageEffect (0x901f20): effect 1 beyond range, else the base effect.
+                         // The in-range branch also has side effects this port omits: a 60-hit counter (cChainsaw
+                         // +0x19, reset past 60 or out of range), setting victim flag cPed+0x338 bit 26, and
+                         // victim->SetHealth(10) (cPed vtable +0x2d8 is SetHealth, not an emitter). These keep the
+                         // victim alive and bleeding, but are ped-side state (peds.cpp). There is no reachable blood
+                         // spray: cParticleEmitterBloodSpray (0x86cc7c) exists in libGame.so but is never constructed
+                         // anywhere in this build (no call site), so nothing here can spawn it.
         const int64_t dx = victim.pos[0] - attacker.pos[0];
         const int64_t dy = victim.pos[1] - attacker.pos[1];
         const int64_t dz = victim.pos[2] - attacker.pos[2];

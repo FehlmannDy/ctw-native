@@ -47,6 +47,7 @@ public:
     unsigned alwaysLoadedTexture() const { return texture_; }
     int alwaysLoadedWidth() const { return textureWidth_; }
     int alwaysLoadedHeight() const { return textureHeight_; }
+    const RadarMap& radarMap() const { return map_; }   // the radar overview tiles, reused by the full-screen map
 private:
     void sprite(int index, float x, float y, float scale, float angle = 0.f, float alpha = 1.f,
                 uint32_t tint = 0xFFFFFFFFu) const;   // tint 0xRRGGBBAA (cSprite +0x74)

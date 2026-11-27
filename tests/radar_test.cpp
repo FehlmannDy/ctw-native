@@ -101,5 +101,43 @@ int main() {
     check(flash.style() == 0 && flash.colour() == 0, "losing the stars ends the flashing once the current flash is over");
     flash.setStyle(6, 12);
     check(flash.colour() == 0, "the tutorial flash restarts from the normal colour");
+
+    // Style 6 (ProcessRadarFlashing at 0x848db8): after the twelve-frame start it gives four quick grey flashes
+    // (colour 3), then a sixty-frame pause at the normal colour before the burst repeats.
+    RadarFlash tutorial;
+    tutorial.setStyle(6, 12);
+    int calls = 0;
+    auto tick = [&]() { tutorial.process(); ++calls; };
+    tick();
+    check(tutorial.style() == 6 && tutorial.colour() == 0, "style 6 is taken on the next frame, still normal");
+    while (tutorial.colour() == 0 && calls < 100) tick();
+    check(tutorial.colour() == 3 && calls == 14, "the first grey flash follows the twelve-frame start and its trigger");
+    int greyFrames = 1;   // already grey on this frame
+    while (tutorial.colour() == 3 && greyFrames < 100) { tutorial.process(); if (tutorial.colour() == 3) ++greyFrames; }
+    check(greyFrames == 6, "each grey flash holds for its five-frame period plus the trigger frame");
+    // The colour toggles 3/0 four times per burst (pulses 1..4), so the grey blinks on twice; pulse 4 then holds
+    // the normal colour for a sixty-frame pause before the next burst.
+    int greyOns = 1, gap = 0;   // the first grey-on has already happened above
+    bool longPause = false;
+    for (int frame = 0; frame < 300; ++frame) {
+        const int before = tutorial.colour();
+        tutorial.process();
+        if (tutorial.colour() == 3 && before != 3) ++greyOns;
+        if (tutorial.colour() == 0) { if (++gap >= 40) { longPause = true; break; } } else gap = 0;
+    }
+    check(longPause && greyOns == 2, "the grey blinks on twice per burst, then a pause of at least forty frames");
+
+    // Style 2 (the PDA tutorial's single grey flash): grey (colour 3) while the period counts down, then it clears
+    // itself back to the normal colour.
+    RadarFlash greyOnce;
+    greyOnce.setStyle(2, 5);
+    greyOnce.process();   // style taken, still normal
+    check(greyOnce.style() == 2 && greyOnce.colour() == 0, "style 2 is taken on the next frame");
+    greyOnce.process();
+    check(greyOnce.colour() == 3, "style 2 turns the radar grey while it counts down");
+    int steps = 0;
+    while (greyOnce.colour() == 3 && steps < 100) { greyOnce.process(); ++steps; }
+    check(greyOnce.colour() == 0 && greyOnce.style() == 0,
+          "style 2 clears itself back to the normal colour once the period has run out");
     return failures ? 1 : 0;
 }

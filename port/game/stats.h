@@ -13,13 +13,13 @@
 // CalcCriminalRating and CalcMediaValue return e_main.gxt text ids.
 //
 // Where the port triggers them (the callers in brackets):
-//   people killed / criminals killed / fishes fed (cPed::HandlePreDead), melee kills (cPed::Damage), weapon kills
+//   people killed / criminals killed / gang kills / fishes fed (cPed::HandlePreDead), melee kills (cPed::Damage), weapon kills
 //   (cSimpleMover::UpdateWeaponKills), bullets that hit (cPed::Damage, cVehicle::Damage), cars and bikes / boats
 //   destroyed (cVehicle::HandlePreDeathEvent), explosions (Explosion::AddExplosion), playing time, hours and days
 //   (cTimeCycle::Process), distances and the longest time in a vehicle (cPlayer::Process), times wasted
 //   (cDeathArrestWatcher::PlayerWasted), weapons picked up (cPlayer::GiveWeapon).
-// Not triggered yet (their systems are not ported): gang kills (cPedInfoManager's in-memory gang flag), the wanted
-// level counters, trading, missions, pickups, radio time, stunt records, cheats, saves and the money counters.
+// Not triggered yet (their systems are not ported): the wanted level counters, trading, missions, pickups, radio
+// time, stunt records, cheats, saves and the money counters.
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -216,9 +216,10 @@ private:
 // cPlayer::Process's stats: ProccessDistance with the player's velocity (the vehicle's while driving, by its type)
 // and MaxLongestTimeSpentInAVehicle with the frames spent in it (30 a second)
 void Stats_PlayerProcess(Game& g);
-// cPed::HandlePreDead for a ped killed by the player or the player's vehicle: people killed, and criminals killed for
-// subtype 1
-void Stats_PedKilledByPlayer(Game& g, int subtype);
+// cPed::HandlePreDead for a ped killed by the player or the player's vehicle: people killed, criminals killed for
+// subtype 1, and gang kills when the ped type/subtype's pedinfo record has the flag at record +0x25 set (ePedType in
+// `type`; a negative type skips the gang lookup for callers that do not know it).
+void Stats_PedKilledByPlayer(Game& g, int subtype, int type = -1);
 // cPed::Damage's tail for damage the player did: melee kills (types 0, 11 and 12 that killed) and
 // cSimpleMover::UpdateWeaponKills (a kill, or any taser hit (type 3), by the weapon in effect; not burning, 0x1D)
 void Stats_PlayerDamage(Game& g, int healthAfter, int type, int effect);

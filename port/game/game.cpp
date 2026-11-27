@@ -1883,6 +1883,7 @@ void Game::render(int W, int H) {
     radio.renderApp(W, H, *this);
     renderPause(W, H);
     Hud_End();
+    if (mapScreen.isOpen()) mapScreen.render(*this, W, H);   // the full-screen cMapApp map, over the HUD
     if (!pauseOpen) devMenu.render(*this, W, H);   // F3, over everything but the pause screen
     restoreInterpolation();
 }
@@ -1909,6 +1910,8 @@ void Game::run() {
             if (key(k)) continue;
             if (k == SDL_SCANCODE_F || k == SDL_SCANCODE_RETURN) enterPressed = true;
         }
+        // the full-screen map zooms with the wheel (consumed here, before the mod host drains it)
+        if (mapScreen.isOpen()) while (int w = Host_PopWheel()) mapScreen.zoomBy(w > 0 ? 1.2f : 1.f / 1.2f);
         if (quitRequested) running = false;
         double now = OS_TimeAccurate();
         acc += uiPaused ? 0.0 : (now - last) * std::max(0.f, std::min(gameSpeed, 20.f));
@@ -1923,15 +1926,44 @@ void Game::run() {
 
 bool Game::gameKeyboard() const { return Plugins_GameInput() && !devMenu.open(); }
 
+void Game::openMap() {
+    if (!mapScreen.built()) {
+        mapScreen.build(gameplayHud.radarMap());   // reuse the radar overview tiles (cMapApp's DS art is not ported)
+        // Draw the mission/location blips on the map at their world positions (cMapApp overlays the radar blips).
+        mapScreen.setBlipsHook([](const MapScreen& ms, const Game& g, int, int) {
+            for (const RadarBlip& b : g.blips) {
+                float sx, sy;
+                if (ms.worldToScreen(b.pos, sx, sy)) Hud_Rect(sx - 3.f, sy - 3.f, 6.f, 6.f, b.colour);
+            }
+        });
+    }
+    mapScreen.open(*this);
+}
+
+bool Game::mapKey(int k) {   // the full-screen map is open: pan/zoom, or close
+    switch (k) {
+    case SDL_SCANCODE_M: case SDL_SCANCODE_ESCAPE: mapScreen.close(); return true;
+    case SDL_SCANCODE_W: case SDL_SCANCODE_UP:     mapScreen.pan(0.f,  60.f); return true;
+    case SDL_SCANCODE_S: case SDL_SCANCODE_DOWN:   mapScreen.pan(0.f, -60.f); return true;
+    case SDL_SCANCODE_A: case SDL_SCANCODE_LEFT:   mapScreen.pan( 60.f, 0.f); return true;
+    case SDL_SCANCODE_D: case SDL_SCANCODE_RIGHT:  mapScreen.pan(-60.f, 0.f); return true;
+    case SDL_SCANCODE_PAGEUP:   case SDL_SCANCODE_EQUALS: mapScreen.zoomBy(1.25f); return true;
+    case SDL_SCANCODE_PAGEDOWN: case SDL_SCANCODE_MINUS:  mapScreen.zoomBy(0.8f);  return true;
+    default: return true;   // swallow all other input while the map is open
+    }
+}
+
 bool Game::key(int k) {
     if (pauseOpen) return pauseKey(k);
     if (k == SDL_SCANCODE_F3 && !devMenu.open() && Plugins_GameInput()) { devMenu.toggle(); return true; }
     if (devMenu.open()) return devMenu.key(*this, k);   // the menu has the keyboard
+    if (mapScreen.isOpen()) return mapKey(k);           // the full-screen map has the keyboard while open
     if (WeaponHud_WheelOpen() && WeaponHud_Key(*this, k)) return true;   // (an open wheel closes on Escape)
     // the mods first: a focused text field (chat, a search box) takes the key, and while a mod has the keyboard
     // nothing reaches the game (no cutscene skip, no weapon wheel, no Enter getting into a car)
     if (Plugins_Key(k)) return true;   // (an open mod menu closes on Esc here)
     if (!Plugins_GameInput()) return true;
+    if (k == SDL_SCANCODE_M) { openMap(); return true; }   // open the full-screen cMapApp map
     if (cutsceneKey(k)) return true;
     if (hotwiring.active() && (k == SDL_SCANCODE_F || k == SDL_SCANCODE_RETURN)) {   // the vehicle button
         hotwiring.quit();   // (cPlayerInVehicleHotwire: it gives up and gets out)

@@ -167,6 +167,19 @@ int main() {
                                    {10, 1, 0, 0, 0, 0}},
                             {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 3});
     check(peds.record(1, 1) && !peds.record(1, 2) && !peds.record(2, 0), "pedinfo records are found by type and subtype");
+
+    {   // IncGangKills (cPed::HandlePreDead 0x881540): after IncPeopleKilled, a kill counts as a gang kill when the
+        // ped's pedinfo record has the byte at +0x25 set. That byte is the port's Record::maleOnly (the same flag
+        // cPed::SetMale 0x878680 reads); type 0 here is a gang (maleOnly 1), type 1 a civilian (maleOnly 0).
+        Game gk;
+        PedsTestAccess::records(gk.peds, {{0, 0, 1, 0, 20, 20}, {1, 0, 0, 0, 0, 0}}, {0, 1});
+        Stats_PedKilledByPlayer(gk, 0, 1);   // a civilian: a person, not a gang member
+        check(gk.stats.data().peopleKilled == 1 && gk.stats.data().gangKills == 0, "a civilian kill is not a gang kill");
+        Stats_PedKilledByPlayer(gk, 0, 0);   // a gang ped (type 0, pedinfo +0x25 set)
+        check(gk.stats.data().peopleKilled == 2 && gk.stats.data().gangKills == 1, "a gang-flagged ped counts a gang kill");
+        Stats_PedKilledByPlayer(gk, 0);      // a caller that does not know the type skips the gang lookup
+        check(gk.stats.data().peopleKilled == 3 && gk.stats.data().gangKills == 1, "an unknown-type kill skips the gang lookup");
+    }
     RandInit(0);
     int men = 0, women = 0;
     bool palettesOk = true;

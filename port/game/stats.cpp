@@ -326,10 +326,17 @@ void Stats_PlayerProcess(Game& g) {   // cPlayer::Process
     }
 }
 
-void Stats_PedKilledByPlayer(Game& g, int subtype) {   // cPed::HandlePreDead
+void Stats_PedKilledByPlayer(Game& g, int subtype, int type) {   // cPed::HandlePreDead
     g.stats.incPeopleKilled();
     if (subtype == 1) g.stats.incCriminalsKilled();
-    // IncGangKills for ped types whose cPedInfoManager info has the gang flag (+0x25): not mapped yet
+    // cPedInfoManager::GetInfo(type, subtype) then IncGangKills when the record's byte at +0x25 is set. In the
+    // original record (0x30 bytes, file +0xC.. copied to memory +0x18) that byte is file +0x19, which cPed::SetMale
+    // (0x878680) reads at +0x25 as the "male only" flag and the port stores as Record::maleOnly. HandlePreDead
+    // (0x881540) tests the same byte to count the kill as a gang kill.
+    if (type >= 0) {
+        const Pedestrians::Record* info = g.peds.record(type, subtype);
+        if (info && info->maleOnly) g.stats.incGangKills();
+    }
 }
 
 void Stats_PlayerDamage(Game& g, int healthAfter, int type, int effect) {   // cPed::Damage

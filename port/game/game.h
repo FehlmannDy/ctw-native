@@ -8,6 +8,7 @@
 #include "cargens.h"
 #include "followcam.h"
 #include "gamehud.h"
+#include "mapscreen.h"
 #include "localarea.h"
 #include "peds.h"
 #include "pausescreen.h"
@@ -69,6 +70,9 @@ public:
     bool key(int scancode);   // game input shared by interactive and scripted runs
     Radio radio;
     GameplayHud gameplayHud;
+    MapScreen mapScreen;                     // the full-screen cMapApp map (toggled with M)
+    void openMap();                          // build (once) + open the big map on the player
+    bool mapKey(int scancode);               // pan/zoom/close while the big map is open
 
     WorldRenderer world;
     Collision collision;
