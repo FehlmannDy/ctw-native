@@ -18,7 +18,7 @@ public:
     struct Ended { uint32_t id, strip, sequence; };
     bool takeEnded(Ended& out);
     bool endRemote(uint32_t id, uint32_t wheel, uint32_t owner, uint32_t strip, uint32_t sequence);
-    void setShared(bool shared);   // AddSkidPoint
+    void setShared(bool shared);   // port-only: multiplayer toggle, clears every mark
     void process();
     void render() const;
 private:

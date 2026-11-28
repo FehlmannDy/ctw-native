@@ -109,7 +109,7 @@ compatibility with the original.
   pistols from two (cArrestOnFoot's AbortKillingOrder rule: an arrest needs the player below 21 health, and from two
   stars standing still or already held). The arresting cop's countdown ends in the "Busted" screen; a cop at the
   driver's door of a slow car (any speed at one star) makes the player get out. Wanted cops spawn at the usual places, not on the original's ring around the
-  player; road blocks, helicopters and the higher levels' units are not ported.
+  player; helicopters and the higher levels' units are not ported (road blocks are, below).
 - **Pedestrians:** civilians and cops walk the pavement network of each world sector, using the original zone
   population, spawn schedule, spawn ring, cleanup distance and `pedinfo.bin` looks (gender, body, colours).
   Joggers run, and everyone hurries in the rain. Nearby player vehicles retain the task's run-speed limit;
@@ -177,13 +177,38 @@ compatibility with the original.
   switching a texture mod on or off no longer stalls the game.
 - **Tools:** the Porter, which makes the game from your APK and lets you pick which bundled mods to include, and a
   showcase viewer for the game's assets.
+- **Police road blocks:** at three or more wanted stars while driving, a road block spawns across a road ahead -
+  police cars parked in a line with armed cops to either side (cRoadBlocks::AddRoadBlock), cleared with the rest of
+  the pursuit. The star threshold and the spawn cadence are approximations.
+- **Traffic lights:** controlled junctions run the original 1024-frame signal cycle (cTrafficLightManager), and the
+  traffic holds at an approach whose axis is not the one flowing.
+- **PDA and its apps (in progress):** the PDA shell with its Stats, Map and Contacts apps, drawn from the game's own
+  loaded sprites and GXT text (opened with **P**). The save screen and the in-world per-app triggers are still partial.
+- **Shops and the drug market (dev menu):** the ported Ammu-Zone weapon store economics (cAmmozoneApp pricing with the
+  discount / on-offer rules, basket, affordability and the purchase charge) and the drug market (cStockMarket price
+  fluctuation within the per-tier bands and cTradeManager's buy / sell), driven from the developer menu's Economy page;
+  there is no in-world shop or dealer trigger yet.
+- **PDA minigames (in progress):** the logic of safe-cracking, bomb disposal, empty-the-boot and drug-van-slash is
+  ported and runnable from the dev menu; safe-cracking and drug-van-slash are drawn with the real minigame sprites
+  (SS_SAFECRACKING, the van backgrounds and SS_DrugVanSlashing). The other two minigames' rendering and the full PDA
+  app wiring are not done.
+- **Safehouse garage:** the garage nearest the first safehouse opens as you drive up to it and closes as you leave
+  (a PC-port approximation; the original's area-trigger car storage is not ported).
+- **Ported components, not yet wired into normal play:** the building / garage door handlers (cDoorHandler's
+  turn / open / walk / close states), race checkpoints (cCheckpointBlips / cCheckpointTT), the scrapyard magnetic-crane
+  control (cMagneticCraneApp), street-vendor behaviour (cVendor), the building-swap manager (cBuildingSwapManager), the
+  trash-bag prop (cBinBag), pedestrian comment selection (cPedComment), a gang hate / hostility monitor (cGangMonitor),
+  and a player melee / shot action detector for mission scripts (punch and shot today; fly-kick and roundhouse await
+  the stage-2 melee combo). The mission framework gains a countdown timer, objective counters and the
+  pass / fail-with-reward path.
 
 **F3** shows the debug overlay and collision diagnostics. The keys are in [CONTROLS.md](CONTROLS.md).
 
 ## Not there yet
 
-- Missions after the first, the PDA (its save screen among its apps), full combat, the rest of the police response (road blocks, helicopters, SWAT and the
-  higher levels' units, route-finding pursuit) and the rest of the original gameplay HUD.
+- Missions after the first, the PDA's save screen and the in-world wiring of its apps and minigames, full combat, the
+  rest of the police response (helicopters, SWAT and the higher levels' units, route-finding pursuit) and the rest of
+  the original gameplay HUD.
 - Radar GPS routes, mission/location blips, a control for the rotating-map setting (the rotation itself is ported), HUD fades,
   the stats screen and the full pause/PDA layout. The radar work is a subset of the HUD, not complete UI parity.
 - Pedestrians do not talk, fight, or use building doors or attractors.

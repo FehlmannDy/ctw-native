@@ -6,6 +6,7 @@
 #include "lookups.h"
 #include "roads.h"
 #include "random.h"
+#include "trafficlights.h"
 #include <cmath>
 #include <cstdlib>
 #include <algorithm>
@@ -424,11 +425,12 @@ bool AISpline::tooSlowForHoldingPattern(const RoadNetwork& rn, uint32_t frame, i
     rn.pos(t_[1].b, N);
     bool held;
     if ((end.flags & 0x1C) == 4) held = true;
-    else {   // cTrafficLightManager::IsTrafficBeingHeld: a 1024-frame cycle (north-south, all red, east-west, all red)
-        uint32_t f = frame & 0x3FF;
-        uint32_t flow = f < 0x180 ? 0 : (f - 0x200 < 0x180 ? 1 : 3);
-        uint32_t direction = std::abs(N[1] - pos[1]) <= std::abs(N[0] - pos[0]) ? 1 : 0;
-        held = flow != direction;
+    else {
+        // cTrafficLightManager::IsTrafficBeingHeld: the junction's 1024-frame signal cycle (direction-0 green,
+        // all-red, direction-1 green, all-red) holds this approach unless its axis is the one flowing now.
+        const TrafficLightManager lights;   // the single global manager (Init: Cycling)
+        const int32_t node[2] = {N[0], N[1]}, here[2] = {pos[0], pos[1]};
+        held = lights.isTrafficBeingHeld(frame, node, here);
     }
     if (!held) return false;
     RoadMeta m = rn.meta(t_[1].b);

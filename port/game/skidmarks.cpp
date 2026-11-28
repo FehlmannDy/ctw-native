@@ -38,13 +38,19 @@ void Skidmarks::setShared(bool shared) {
     shared_ = shared;
 }
 
-bool Skidmarks::addPoint(uint32_t id, const int32_t p[3], const int32_t dir[3], int hold, uint32_t* strip, uint32_t* sequence) {
+bool Skidmarks::addPoint(uint32_t id, const int32_t p[3], const int32_t dir[3], int hold, uint32_t* strip, uint32_t* sequence) {   // cSkidmarkManager::AddSkidPoint
+    // 0x0089f0a8: reuse the active mark whose id matches, else grab a free slot (id==0) and cSkidmark::Start it,
+    // then forward to cSkidmark::AddPoint. The original fixes the table at 16 marks (w4=0x10); the port widens it to
+    // 256 only in multiplayer, so single-player keeps the 16 the binary uses.
     Mark* m = nullptr;
     const int limit = shared_ ? 256 : 16;
     for (int i = 0; i < limit; ++i) if (marks_[i].active && !marks_[i].remote && marks_[i].id == id) m = &marks_[i];
     if (!m) {
         for (int i = 0; i < limit; ++i) if (!marks_[i].id) m = &marks_[i];
         if (!m) return false;
+        // cSkidmark::Start (0x0089e94c): wipe the points, wait=0x78, alpha=0xC, id=the wheel key. The binary also
+        // stores the hold byte into its fade-gate (+9); Mark{} leaves fade=1, which is equivalent since the gate is
+        // only ever tested for non-zero in Process and hold here is always 1 or 4 (never 0). (observation)
         *m = Mark{}; m->active = 1; m->id = id;
         if (++nextStrip_ == 0) ++nextStrip_;
         m->strip = nextStrip_;
@@ -96,7 +102,10 @@ bool Skidmarks::endRemote(uint32_t id, uint32_t wheel, uint32_t owner, uint32_t 
     return false;
 }
 
-void Skidmarks::process() {   // cSkidmarkManager::Process
+void Skidmarks::process() {   // cSkidmarkManager::Process (0x0089ef24): the 16-mark loop
+    // The loop body is cSkidmark::Process (0x0089eafc), which the binary inlines here too: while active, count the
+    // hold frames down then deactivate; once inactive, run the wait timer down by 2 (gated on the fade byte), then
+    // decay alpha, then free the slot (id=0, wait=0x78, alpha=0xC). recordEnd/wait fields are port-only networking.
     for (Mark& m : marks_) {
         if (!m.id) continue;
         if (m.active) {
@@ -112,7 +121,10 @@ void Skidmarks::process() {   // cSkidmarkManager::Process
     }
 }
 
-void Skidmarks::render() const {   // cSkidmark::Render: black, alpha / 31, one triangle strip per mark
+void Skidmarks::render() const {   // cSkidmarkManager::Render (0x0089efdc): the per-mark loop
+    // Each mark draws through cSkidmark::Render (0x0089eb98): skip when count < 3, colour black at alpha/31 and emit
+    // one triangle strip whose vertices are (origin + pts[i]) * 2^-16 (0x37800000). The binary pushes origin through
+    // an identity model matrix; folding it into the vertex here is equivalent.
     glDisable(GL_TEXTURE_2D);
     glDisable(GL_LIGHTING);
     glDisable(GL_CULL_FACE);

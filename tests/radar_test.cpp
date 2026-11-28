@@ -73,6 +73,38 @@ int main() {
     northUp.worldOffset(focus, focus, x, y, 75.f);
     check(x == 0 && y == 0, "the focus marker stays centred without dividing by zero");
 
+    // GetRadarSpaceFromWorldSpace, normal-radar branch (0x848044). Re-derived against the binary's constants:
+    // offset = (world - focus) * 0x666 >> 12 (Q12), rotated, then clamped to RADAR_GRAPHIC_RADIUS = 75 (= GetRadarWidth
+    // 150 / 2, from cRadar::GetRadarWidth at 0x846eec returning 150.0f on a phone). A 3-4-5 marker 500 world units away
+    // must keep its direction when clamped, so the clamped point lands on 45, -60 (3:4, radius 75).
+    const int32_t origin[3] = {0, 0, 0};
+    int32_t far35[3] = {300 * 4096, 400 * 4096, 0};
+    northUp.worldOffset(far35, origin, x, y, 75.f);
+    check(std::fabs(x - 45.f) < .1f && std::fabs(y + 60.f) < .1f && std::fabs(std::hypot(x, y) - 75.f) < .01f,
+          "the circular clamp preserves the 3:4 bearing and lands on the 75-unit edge");
+    northUp.worldOffset(far35, origin, x, y);   // no radius: the unclamped Q12 offset keeps its full length
+    check(std::fabs(x - 119.970703f) < .001f && std::fabs(y + 159.9609375f) < .001f,
+          "without a radius the 0x666 scale yields the raw Q12 offset");
+
+    // The default projection is cRadar::Rotate with rotation disabled (+0xc54 == 0 at 0x8482ec): cosine 0x1000, sine 0,
+    // i.e. an identity that only flips world-y to screen-up. mapOffset and worldOffset must agree on that convention.
+    RadarProjection identity;
+    identity.mapOffset(13.f, -27.f, x, y);
+    check(x == 13.f && y == -27.f, "the north-up projection leaves tile vertices unrotated");
+    int32_t east[3] = {50 * 4096, 0, 0}, northPt[3] = {0, 50 * 4096, 0};
+    identity.worldOffset(east, origin, x, y);
+    check(x > 0.f && std::fabs(y) < .001f, "world east stays on the radar's right with no rotation");
+    identity.worldOffset(northPt, origin, x, y);
+    check(std::fabs(x) < .001f && y < 0.f, "world north points up (negative radar y) with no rotation");
+
+    // A half-turn camera (yaw 0x8000 -> Rotate angle -0x8000): fastsin gives sine 0, cosine -0x1000, so a northern
+    // marker appears at the bottom of the radar. Confirms the matrix sign, not just the quarter-turn case above.
+    const RadarProjection southCamera(0x8000);
+    int32_t north200[3] = {0, 200 * 4096, 0};
+    southCamera.worldOffset(north200, origin, x, y, 75.f);
+    check(std::fabs(x) < .001f && std::fabs(y - 75.f) < .001f,
+          "facing south puts the northern marker at the bottom edge");
+
     RadarFlash flash;
     float rgb[3];
     flash.tint(rgb);

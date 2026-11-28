@@ -39,6 +39,7 @@ void Safehouses::reset() {
     state_ = kIdle;
     forced_ = false;
     waitFrames_ = 0;
+    carGarage_ = -2;
 }
 
 void Safehouses::setupDoorMarker(Game& game) {
@@ -122,8 +123,36 @@ void Safehouses::walkOut(Game& game) {
     }, true);
 }
 
+// PC-port convenience: the original's drive-in safehouse garages are not ported. Open the cGarage nearest the
+// safehouse marker (if one is genuinely close) while the player drives up to it, and close it when they leave.
+void Safehouses::updateCarGarage(Game& game) {
+    if (carGarage_ == -2) {   // resolve once: garages.dat is static, indices are stable
+        carGarage_ = -1;
+        const int g = game.garages.closest(kMarker);
+        if (g >= 0) {
+            int32_t gp[3];
+            game.garages.position(g, gp);
+            const int64_t dx = gp[0] - kMarker[0], dy = gp[1] - kMarker[1];
+            if (dx * dx + dy * dy <= (int64_t)0x14000 * 0x14000) carGarage_ = g;   // within ~20 units of the safehouse
+        }
+    }
+    if (carGarage_ < 0) return;
+    int32_t gp[3];
+    game.garages.position(carGarage_, gp);
+    const int32_t* p = game.player.pos;
+    const int64_t dx = gp[0] - p[0], dy = gp[1] - p[1];
+    const bool nearInCar = game.playerCar >= 0 && dx * dx + dy * dy <= (int64_t)0xC000 * 0xC000;   // in a car, ~12 units
+    const Garages::State st = game.garages.state(carGarage_);
+    if (nearInCar) {
+        if (st == Garages::kShut || st == Garages::kClosing) game.garages.open(carGarage_);
+    } else if (st == Garages::kOpen || st == Garages::kOpening) {
+        game.garages.close(carGarage_);
+    }
+}
+
 void Safehouses::tick(Game& game) {
     door_.tick(game);
+    updateCarGarage(game);
     if (state_ == kLeaving && waitFrames_ > 0 && --waitFrames_ == 0 && game.screenFade.level() != 0)
         game.screenFade.in(30);   // DelayFadeOnWalkout: FadeIn(30) while it is black
     const bool owned = game.saveGame.safehouseOwned(kSafehouse);

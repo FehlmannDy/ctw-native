@@ -147,6 +147,9 @@ void DoorHandler::start(Game& g, const int32_t pos[3], int heading, Action actio
     doMainStuff(g, action, placeInside);
 }
 
+// cDoorHandler::DoMainStuff: pick the approach point (kFront/kBehind) and the far point (kIn/kOut), make a circular
+// area of the enter/leave radius (0x2000 entering, 0x1000 leaving), walk the player to it, and either turn now
+// (Location::Contains) or when he next enters a 1-unit vicinity of it.
 void DoorHandler::doMainStuff(Game& g, Action action, bool placeInside) {
     Player& p = g.player;
     static const int32_t kFront[3] = {0, 0x2000, 0}, kBehind[3] = {0, -0x2000, 0};   // qword_479EF8, qword_47CAB8
@@ -212,20 +215,23 @@ void DoorHandler::turnTo(Game& g, const int32_t at[3]) {   // heading -ATan2(x -
     g.player.setHeading((int16_t)(atan2f(dx, dy) * 10430.378f));
 }
 
-void DoorHandler::doTurn(Game& g) {   // DoTurn: Ped::SetIdle, a frame
+void DoorHandler::doTurn(Game& g) {   // cDoorHandler::DoTurn: Ped::SetIdle, a frame
     stop();
     state_ = &DoorHandler::doTurn;
     g.scriptWalk.on = false;
     waitThen(1, &DoorHandler::finishTurn);
 }
 
-void DoorHandler::finishTurn(Game& g) {   // FinishTurn: face the far side, a frame
+void DoorHandler::finishTurn(Game& g) {   // cDoorHandler::FinishTurn: face the far side, a frame
     stop();
     turnTo(g, through_);
     waitThen(1, &DoorHandler::openDoor);
 }
 
-void DoorHandler::openDoor(Game& g) {   // OpenDoor: the animation (a male ped), the door at speed 2, 5 frames
+// cDoorHandler::OpenDoor: the open-door animation (only if the ped is male), the door opened at move-speed 2, sfx
+// 0x27F, then 5 frames before walking through. (The binary guards the anim with Ped::IsMale; the port's player is
+// always male, so startOpenDoorAnim is called unconditionally.)
+void DoorHandler::openDoor(Game& g) {
     stop();
     g.player.startOpenDoorAnim();
     if (door_) {
@@ -237,8 +243,10 @@ void DoorHandler::openDoor(Game& g) {   // OpenDoor: the animation (a male ped),
 }
 
 void DoorHandler::finishWalking(Game& g) {
-    // FinishWalking: through the wall to the far side (Ped::SetGoTo flags 0xC00000), closing the door once within
-    // 1 unit of it or after 90 frames, whichever comes first (Ped::SetStopAnim leaves the door's reaction alone)
+    // cDoorHandler::FinishWalking: through the wall to the far side (Ped::SetGoTo flags 0xC00000), closing the door
+    // once within 1 unit of it or after 90 frames, whichever comes first. (The binary also calls Ped::SetStopAnim
+    // here when the ped is male to end the open-door reaction; the port has no stop-anim hook on Player, so the
+    // reaction simply plays through. Cross-file: a Player::setStopAnim hook in player.h would match exactly.)
     g.player.collisionProof = true;
     g.scriptWalk.on = true;
     for (int k = 0; k < 3; ++k) g.scriptWalk.target[k] = through_[k];
@@ -247,7 +255,7 @@ void DoorHandler::finishWalking(Game& g) {
     waitThen(0x5A, &DoorHandler::closeDoor);
 }
 
-void DoorHandler::closeDoor(Game&) {   // CloseDoor: speed 2, 15 frames
+void DoorHandler::closeDoor(Game&) {   // cDoorHandler::CloseDoor: close at move-speed 2, then 15 frames
     stop();
     if (door_) {
         door_->close(false);
@@ -256,14 +264,15 @@ void DoorHandler::closeDoor(Game&) {   // CloseDoor: speed 2, 15 frames
     waitThen(0xF, &DoorHandler::finishClose);
 }
 
-void DoorHandler::finishClose(Game& g) {   // FinishClose: sfx 0x189, then Finished
+void DoorHandler::finishClose(Game& g) {   // cDoorHandler::FinishClose: sfx 0x189, then Finished
     TheSound().playResident(0x189, 0x3C);
     stop();
     finished(g);
 }
 
 void DoorHandler::finished(Game& g) {
-    // Finished: the door is released (and goes), the player collidable again and released, then the callback
+    // cDoorHandler::Finished: the door is released (and goes), the player collidable again and released, then the
+    // callback
     stop();
     state_ = nullptr;
     for (size_t i = 0; i < g.doors.size(); ++i)

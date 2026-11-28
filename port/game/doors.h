@@ -34,6 +34,7 @@ public:
     int16_t right[3], fwd[3];      // cEntity +0x3C, +0x42
 
 private:
+    friend struct DoorTestAccess;
     int16_t halfWidth_, height_;   // +0x4F8, +0x4FA
     uint8_t hold_;                 // +0x4FC
     uint8_t speed_ = 1;            // +0x4FD
@@ -56,6 +57,7 @@ public:
     bool active() const { return door_ != nullptr || state_ != nullptr; }
 
 private:
+    friend struct DoorTestAccess;
     using State = void (DoorHandler::*)(Game&);
     void doMainStuff(Game& game, Action action, bool placeInside);
     void stop();   // cScriptProcessBase::Stop: what it was waiting for is dropped

@@ -106,6 +106,13 @@ private:
     uint32_t lastCollision_ = 0;
 
     int addEvent(Entity& e, int event, int volume, int radius, int sfx);   // cAudioManager::AddSoundEvent
+    // cAudioManager::ComputeVolume: 0 beyond radius or the 100000-unit cull, the full volume within 0.2 x radius,
+    // then a square-law fall-off to the edge. (The original's interior ExpandSfxRadius global, which widens the
+    // radius by 1300 squared units, is not modelled; the port always takes the outdoor path.)
+    static int computeVolume(int volume, int radius, uint32_t d2);
+    // cAudioManager::ComputePan: a source's camera-space right (lx) and forward (lz) projection, in world units,
+    // to a 0 (hard left) .. 127 (hard right) pan. 0x40 straight ahead; clamps to 0x3F past ~0x198 forward.
+    static int computePan(float lx, float lz);
     struct HornChannel {             // cHorn: three of 0x1C bytes
         uint32_t delay = 0;          // +0x00: honks to let pass before this channel takes another
         int8_t step = -1;            // +0x04: the pattern step, -1 free

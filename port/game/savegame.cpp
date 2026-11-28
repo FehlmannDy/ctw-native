@@ -223,6 +223,34 @@ bool SaveGame::saveCurrent(Game& game, int slot, bool inPda, bool skipCode) {
     return ok;
 }
 
+// Decode the SaveProgress the Stats app reads straight from the loaded save's script section. Every field mirrors a
+// SaveGameImpl getter verified against libGame.so (offsets are script-relative, i.e. kScript + x):
+//   GetAmbientMissionMedal(m): 2 bits per mission packed from +0x4C   [0x008bda58]
+//   USJCompleted(i):           1 bit  per jump    from +0x48          [0x008bd944]
+//   PackageCollected(i):       1 bit  per camera  from +0x38          [0x008bd8bc]
+//   SafehouseOwned(i):         1 bit  per house   from +0x34          [0x008bbc00]
+//   ItemOwned(i):              byte array at +0x7E0                   [0x008bc6a8]
+//   DealerFound(i):            byte array at +0x7E6                   [0x008bc6d0]
+//   random encounters:         8 bytes at +0x7A5 (0x80 = not found)   (CalcRandomEncountersFound; defaults() seeds 0x80)
+//   OJRaceBestTime(i):         halfword array at +0x6F4 (GetBestRaceTime biases the id by 0x4C, so i is 0-based) [0x008bd798]
+//   TattooBestScore():         halfword at +0x70E                     [0x008bd598]
+SaveProgress SaveGame::progress() const {
+    SaveProgress p{};
+    const uint8_t* s = data_ + kScript;
+    auto bit = [&](int at, int i) { return (get<uint32_t>(data_, kScript + at + (i >> 5) * 4) >> (i & 31)) & 1; };
+    for (int m = 0; m < 0x55; ++m)
+        p.ambientMedal[m] = (uint8_t)((get<uint32_t>(data_, kScript + 0x4C + (m >> 4) * 4) >> ((m & 15) * 2)) & 3);
+    for (int i = 0; i < 30; ++i) p.uniqueJump[i] = bit(0x48, i) != 0;
+    for (int i = 0; i < 100; ++i) p.package[i] = bit(0x38, i) != 0;
+    for (int i = 0; i < 21; ++i) p.safehouse[i] = bit(0x34, i) != 0;
+    for (int i = 0; i < 0x51; ++i) p.dealer[i] = s[0x7E6 + i] != 0;
+    for (int i = 0; i < 6; ++i) p.item[i] = s[0x7E0 + i] != 0;
+    for (int i = 0; i < 8; ++i) p.encounter[i] = s[0x7A5 + i];
+    for (int i = 0; i < 16; ++i) p.raceBestTime[i] = get<uint16_t>(data_, kScript + 0x6F4 + i * 2);
+    p.tattooBestScore = get<uint16_t>(data_, kScript + 0x70E);
+    return p;
+}
+
 bool SaveGame::deleteSlot(int slot) { return OS_FileDelete(OS_AREA_DOCUMENTS, fileName(slot).c_str()) == OS_OK; }
 
 void SaveGame::setMissionPassed(int mission, int status) {

@@ -11,6 +11,8 @@ int32_t fastsin(int a) { return (int32_t)std::lround(std::sin((int16_t)a * 3.141
 }
 
 bool Garages::load(const std::string& dataDir) {
+    // Re-callable: clears the list then re-reads garages.dat, exactly cGarageManager::Reset (zero the count, then
+    // the same AddOne-per-record loop Init uses). A reload returns every door to its freshly-added shut state.
     garages_.clear();
     GameFs fs;
     std::vector<uint8_t> d;

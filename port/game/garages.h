@@ -18,8 +18,9 @@
 class Garages {
 public:
     enum State { kOpen = 0, kClosing = 1, kShut = 2, kOpening = 3 };   // cGarage +0x10
-    bool load(const std::string& dataDir);    // cGarageManager::Init
+    bool load(const std::string& dataDir);    // cGarageManager::Init, and cGarageManager::Reset (clear + reload garages.dat)
     int count() const { return (int)garages_.size(); }
+    int16_t heading(int i) const { return i >= 0 && i < count() ? garages_[i].heading : 0; }   // cGarage::GetHeading (+0x34)
     void process();                           // cGarage::Process, each garage once a frame
     int closest(const int32_t pos[3]) const;  // cGarageManager::GetGarageClosestToPoint, -1 if there are none
     void open(int i);                         // cGarage::Open

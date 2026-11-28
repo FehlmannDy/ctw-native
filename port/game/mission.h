@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 class Game;
@@ -40,12 +41,58 @@ public:
     bool loadText(const std::string& dataDir, const std::string& name);
     std::u16string text(int id) const;
 
+    // The mission's end state, as cActStructure keeps it: a mission runs until a script passes or fails it.
+    enum Outcome { kRunning, kPassed, kFailed };
+    Outcome outcome() const { return outcome_; }
+    // The cash actually granted at the last pass (ScriptPlayer::GiveMoney in cActStructure::DoRewardForMission): the
+    // mission's reward unless it was a replay, when the reward is nothing.
+    int32_t rewardCash() const { return rewardCash_; }
+    // The countdown clock a timed mission arms: its remaining 30 Hz frames, or -1 when no clock is running.
+    int timerRemaining() const { return timerFrames_; }
+    bool timerActive() const { return timerFrames_ >= 0; }
+    // A multi-objective mission's bookkeeping (e.g. "collect N of X"): the goals set and the ones done so far.
+    int objectivesTotal() const { return objTotal_; }
+    int objectivesDone() const { return objDone_; }
+    bool allObjectivesDone() const { return objTotal_ > 0 && objDone_ >= objTotal_; }
+
+    // HUDImpl::DisplayWinLose / E_MAIN ids and times the mission end uses, from cActStructure::PassMission's path
+    // (0x5D "MISSION PASSED" for 0x5A frames; 0x5C "MISSION FAILED" for 0x46) and cActStructure::DoRewardForMission
+    // (0xcb8948: 0x5E the reward line and 0x5D together in font 5 for 0x32 frames, then GiveMoney).
+    static constexpr int kPassStringId = 0x5D;
+    static constexpr int kFailStringId = 0x5C;
+    static constexpr int kRewardStringId = 0x5E;
+    static constexpr int kPassedDisplayFrames = 0x5A;   // 90
+    static constexpr int kFailedDisplayFrames = 0x46;   // 70
+    static constexpr int kRewardDisplayFrames = 0x32;   // 50
+    static constexpr int kWinLoseFont = 5;
+
 protected:
     virtual void onFrame(Game&) {}                          // the mission's own processes, before its waits
     void wait(int frames, std::function<void()> fn);        // TimerImpl::Wait
     void when(std::function<bool()> test, std::function<void()> fn);   // polled every frame until true
     void cancelAll();                                       // cScriptProcessBase::Stop
-    void finish() { finished_ = true; cancelAll(); }
+    void finish() { finished_ = true; stopTimer(); cancelAll(); }
+
+    // A mission time limit: `frames` 30 Hz frames down to zero, then onExpire once (TimerImpl::Wait style). tick()
+    // counts it with the frame; the clock is dropped when the mission finishes.
+    void startTimer(int frames, std::function<void()> onExpire = nullptr) {
+        timerFrames_ = frames; onTimer_ = std::move(onExpire);
+    }
+    void stopTimer() { timerFrames_ = -1; onTimer_ = nullptr; }
+
+    void setObjectiveCount(int n) { objTotal_ = n; objDone_ = 0; }   // the goals a mission tracks
+    void completeObjective() { if (objDone_ < objTotal_) ++objDone_; }
+
+    // cActStructure::DoRewardForMission (0xcb8948): a replay earns nothing (WorldImpl::IsOnReplayMission); otherwise
+    // the per-mission cash is the reward, and the mission passes. Returns the cash to hand to ScriptPlayer::GiveMoney.
+    int32_t passWithReward(int32_t cash, bool replay = false) {
+        rewardCash_ = replay ? 0 : cash;
+        outcome_ = kPassed;
+        finish();
+        return rewardCash_;
+    }
+    void pass() { outcome_ = kPassed; finish(); }    // cActStructure::PassMission (no reward to show)
+    void fail() { outcome_ = kFailed; finish(); }    // cActStructure::FailCurrentMission
 
 private:
     struct Wait { int frames; std::function<void()> fn; };
@@ -55,6 +102,11 @@ private:
     std::vector<std::u16string> text_;
     bool finished_ = false;
     unsigned generation_ = 0;   // bumps when everything is cancelled, so a running callback's queue is dropped
+    Outcome outcome_ = kRunning;
+    int32_t rewardCash_ = 0;
+    int timerFrames_ = -1;      // the countdown clock; -1 when none is running
+    std::function<void()> onTimer_;
+    int objTotal_ = 0, objDone_ = 0;
 };
 
 // cScreenFade (CameraImpl::FadeToBlack / FadeIn): black over the picture, with a callback when it is done. The

@@ -75,6 +75,18 @@ public:
         return makeup >= 0 && makeup < (int)pedMakeups_.size() ? &pedMakeups_[makeup] : nullptr;
     }
 
+    // cRoadBlocks::AddRoadBlock (0x8f6774): a line of police cars (eVehicleId 0x12) across a road link ~20 units
+    // ahead, each with a cop driver (ePedType 0xA) and two cops on foot (weapon 5, enforcer AI, target player).
+    // playerPos is the reference (the driving player). Returns true if a block was placed. Reuses the port's spawn
+    // primitives (spawnCar, Pedestrians::createDriver / spawnRoadBlockCop, Traffic::enforce).
+    bool spawnRoadBlock(Game& g, const int32_t playerPos[3]);
+    // The per-lane geometry of AddRoadBlock, as a pure function for tests. dir is the normalised road direction
+    // (Q12, from Normalise(nodeB - nodeA)); right = (dir.y, -dir.x). The lane's car sits on the create position
+    // offset by right*8 per lane and centred on the link; its two cops sit two units behind it (-2*dir), flanking
+    // the car by +-right (one unit).
+    struct RoadBlockUnit { int32_t car[3]{}, copA[3]{}, copB[3]{}; };
+    static RoadBlockUnit roadBlockUnit(const int32_t centre[3], const int32_t dir[3], int lanes, int lane);
+
 private:
     struct Driver {           // cWanderRoads
         struct Pursuit {
@@ -111,6 +123,7 @@ private:
     std::vector<Makeup> makeups_;
     std::vector<std::vector<std::pair<uint16_t, uint16_t>>> pedMakeups_;
     uint32_t linkCursor_ = 0;
+    uint32_t roadBlockCooldown_ = 0; // frames until another road block may be spawned (approximation; see update())
     uint8_t spawnFallback_ = 0; // ordinary population spawn retry state (+0x5A)
     bool heliActive_ = false;   // +0x58: a police helicopter exists (never in the port)
     uint32_t heliTimer_ = 0;    // +0x5C: frames before another helicopter roll
@@ -130,6 +143,10 @@ private:
     void rejoin(Game& g, Vehicle& v, Driver& d);
     void wanderUnderPhysics(Game& g, Vehicle& v, Driver& d);   // cWanderRoadsUnderPhysics::Process
     bool enforce(Game& g, Vehicle& v, Driver& d); // police vehicle pursuit and the handoff to arrest on foot
+    void updateRoadBlocks(Game& g);  // the wanted-driven trigger for spawnRoadBlock, from update()
+    // cRoadBlocks::IsAreaClearForRoadBlock (0x8f6a5c): reject water ground (surface 2) or a cop ped / police car
+    // (VehicleID 0x12) already within `side` units of the create position.
+    bool isAreaClearForRoadBlock(Game& g, const int32_t centre[3], int32_t side);
     void pursuitTarget(const Game& g, const Vehicle& v, Driver::Pursuit& state, int32_t out[3]);
     int32_t roadSpeed(Game& g, const Vehicle& v, const Driver& d) const;   // iAITask::GetRoadSpeed
     friend struct TrafficTestAccess;

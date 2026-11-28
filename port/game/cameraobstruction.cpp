@@ -13,8 +13,11 @@ void CameraObstruction::count(const int32_t target[3], const int32_t camera[3], 
     } else blockedFrames_ = 0;
 }
 
+// cBaseCam::SetCameraAboveTarget
 void CameraObstruction::aboveTarget(const int32_t t[3], int32_t camera[3], Collision& col) {
-    // SetCameraAboveTarget checks both the space above the view and the target's vertical sight line.
+    // Checks both the space above the view (camera.z+0x1E000 down to camera.z) and the target's vertical
+    // sight line (target up by 0x1E000), both with the camera box filter 0x80000200; on a clear result the
+    // eye is moved onto the target's XY column while keeping its own height.
     int32_t high[3] = {t[0], t[1], camera[2] + 0x1E000}, low[3] = {t[0], t[1], camera[2]};
     if (col.staticLine(high, low, 0x80000200)) return;
     high[2] = t[2] + 0x1E000;
@@ -22,6 +25,10 @@ void CameraObstruction::aboveTarget(const int32_t t[3], int32_t camera[3], Colli
     camera[0] = t[0]; camera[1] = t[1];
 }
 
+// cBaseCam::HandleStuckCam: only acts once the view has been blocked for at least six frames. It traces the
+// target-to-camera line (offset +0x28 at both ends) and, depending on which filter reports a hit, either slides
+// the eye off the nearest box face (margin CameraRadius+40, rejecting a face with no sky above it, keeping the
+// old height) or falls back to SetCameraAboveTarget.
 void CameraObstruction::recover(const int32_t t[3], int32_t camera[3], Collision* col) const {
     if (blockedFrames_ < 6 || !col || !col->ok()) return;
     const int32_t margin = 0x14CD + 40; // CameraRadius plus the original fixed-point clearance

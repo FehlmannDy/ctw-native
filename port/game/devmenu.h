@@ -11,6 +11,7 @@
 #include <functional>
 #include <string>
 #include <vector>
+#include "dealer.h"   // the Economy page's drug market (ctw::DrugMarket)
 
 class Game;
 
@@ -32,7 +33,7 @@ private:
     void build(Game& game);
     void move(int step);
     void activate(int row);
-    std::vector<std::string> pages_ = {"Overlay", "Missions", "Cutscenes", "Minigames", "World", "Player"};
+    std::vector<std::string> pages_ = {"Overlay", "Missions", "Cutscenes", "Minigames", "World", "Player", "Economy", "Minigames+"};
     std::vector<Row> rows_;
     int page_ = 0, selected_ = 0, scroll_ = 0;
     bool open_ = false;
@@ -41,4 +42,6 @@ private:
     int carStyle_ = 0;                                    // eSinkingVehicleStyle for the minigame
     std::string status_;                                  // the last action's result
     int lastMouse_[2] = {-1, -1};
+    ctw::DrugMarket market_;                              // the Economy page's drug market (seeded once)
+    bool marketReady_ = false;
 };

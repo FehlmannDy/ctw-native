@@ -49,7 +49,11 @@ void RadarProjection::mapOffset(float dx, float dy, float& x, float& y) const {
 
 void RadarProjection::worldOffset(const int32_t pos[3], const int32_t focus[3],
                                   float& x, float& y, float radius) const {
-    // GetRadarSpaceFromWorldSpace retains Q12 fractions for markers, unlike the tile origin.
+    // cRadar::GetRadarSpaceFromWorldSpace, the normal-radar branch (eRadarMode 0/3 at 0x848044): the focus-relative
+    // offset scaled by 0x666, rotated by the cRadar::Rotate matrix, and clamped to RADAR_GRAPHIC_RADIUS. It keeps the
+    // Q12 marker fraction, unlike the tile origin's integer pixels. The fullscreen/PDA-map branches (modes 1/2) and
+    // the routine's exact IsAPhone/Normalise fixed-point pre-clamp are the pdamap path, not ported here; a nonzero
+    // radius clamps by circular distance exactly as the original's dist^2 > R^2 test (strictly outside is rescaled).
     const int64_t dx = (((int64_t)pos[0] - focus[0]) * 0x666) >> 12;
     const int64_t dy = -((((int64_t)pos[1] - focus[1]) * 0x666) >> 12);
     x = (float)((dx * cosine_ - dy * sine_) >> 12) / 4096.f;

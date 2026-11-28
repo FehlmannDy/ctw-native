@@ -57,3 +57,6 @@ Thumbs.db
 # CTW Online (the Cloudflare Worker) tooling
 /online/node_modules/
 /online/.wrangler/
+
+# Claude
+.Claude/

@@ -6,6 +6,7 @@
 #include <string>
 
 class Game;
+struct SaveProgress;   // stats.h: the decoded save sections the Stats app reads
 
 // cSaveGameMgr and SaveGameImpl: the save game. Its data (cSaveGameMgr::mData, sSaveGameData) is 0xDB0 bytes kept
 // as the original lays them out, and a slot is that block as it is, in the documents area as "savegame<slot>"
@@ -56,6 +57,13 @@ public:
     bool isMissionPassed(int mission) const;                    // IsMissionPassed: status 3
 
     const uint8_t* data() const { return data_; }
+
+    // The SaveProgress sections the pause-menu / PDA Stats app reads (ambient medals, unique jumps, cameras,
+    // safehouses, dealers, items, random encounters, best race times, tattoo score), decoded live from the loaded
+    // save's script section (cSaveGameMgr::GetScriptSectionOfSaveGame == kScript). Mirrors the SaveGameImpl getters
+    // GetAmbientMissionMedal / USJCompleted / PackageCollected / SafehouseOwned / DealerFound / ItemOwned /
+    // OJRaceBestTime / TattooBestScore and CalcRandomEncountersFound. Returns zeros before a save is loaded.
+    SaveProgress progress() const;
 
 private:
     static constexpr int kHelpBits = 64;   // +0x2C and +0x30: the safehouses' bits follow

@@ -424,7 +424,139 @@ void Traffic::wander(Game& g, Vehicle& v, Driver& d) {   // On-rail state at 0x7
     d.lastFrame = g.frame;
 }
 
+// cRoadBlocks::AddRoadBlock lane geometry (0x8f68a0..0x8f69ac): right = (dir.y, -dir.x); the lane step is right*8
+// (the normalised Q12 direction shifted left by three), the cars are centred on the create position, and each car's
+// two cops sit 2*dir behind it (toward nodeA), flanking it by +-right (one unit).
+Traffic::RoadBlockUnit Traffic::roadBlockUnit(const int32_t centre[3], const int32_t dir[3], int lanes, int lane) {
+    RoadBlockUnit u;
+    const int32_t stepX = dir[1] << 3, stepY = (-dir[0]) << 3;   // right * 8
+    const int32_t startX = centre[0] - ((stepX * (lanes - 1)) >> 1);
+    const int32_t startY = centre[1] - ((stepY * (lanes - 1)) >> 1);
+    u.car[0] = startX + stepX * lane;
+    u.car[1] = startY + stepY * lane;
+    u.car[2] = centre[2];
+    const int32_t base0 = u.car[0] - (dir[0] << 1), base1 = u.car[1] - (dir[1] << 1), base2 = u.car[2] - (dir[2] << 1);
+    u.copA[0] = base0 + dir[1]; u.copA[1] = base1 - dir[0]; u.copA[2] = base2;   // base + right
+    u.copB[0] = base0 - dir[1]; u.copB[1] = base1 + dir[0]; u.copB[2] = base2;   // base - right
+    return u;
+}
+
+bool Traffic::isAreaClearForRoadBlock(Game& g, const int32_t centre[3], int32_t side) {
+    // CCollision::GetGround: reject a create position over water (surface type 2).
+    if (g.collision.ground(centre[0] / 4096.f, centre[1] / 4096.f, centre[2] / 4096.f).surface == 2) return false;
+    // cWorldEntityIterator over the radius: reject if a cop ped (class 0xD) or a police vehicle (class 0xC with
+    // VehicleID 0x12) is already within it. The native Q12 squared-distance compare truncates the radius squared.
+    const int64_t radius2 = ((int64_t)side * side) & ~0xfffLL;
+    for (const Vehicle& v : g.cars)
+        if (v.infoId == 0x12) {
+            int64_t d2 = 0; for (int k = 0; k < 3; ++k) { const int64_t d = (int64_t)v.pos[k] - centre[k]; d2 += d * d; }
+            if (radius2 >= d2) return false;
+        }
+    for (const Pedestrians::Ped& p : g.peds.peds)
+        if (!p.vehicle && p.type == 10) {   // an on-foot cop
+            int64_t d2 = 0; for (int k = 0; k < 3; ++k) { const int64_t d = (int64_t)p.body.pos[k] - centre[k]; d2 += d * d; }
+            if (radius2 >= d2) return false;
+        }
+    return true;
+}
+
+bool Traffic::spawnRoadBlock(Game& g, const int32_t playerPos[3]) {
+    if (!g.roads.ok()) return false;
+    const RoadNetwork& rn = g.roads;
+    auto headingOf = [](int32_t x, int32_t y) {
+        return (int16_t)std::lround(std::atan2((double)x, (double)y) * 10430.37835047);
+    };
+    // cLocalAreaKnowledge::GetCreatePosition(dist 20.0 Q12, network 2): a point ~20 units from the player on a
+    // ground road link (network 2 excludes underwater nodes, z < -4). APPROXIMATION: the port does not have the
+    // road-block variant of GetCreatePosition (its createPos is the ordinary-population search: a 69-unit chord
+    // circle returning a random lane index, not the 20-unit constrained search returning the link's lane count), so
+    // the create position is found here as the link whose nearest point to the player is closest to 20 units. The
+    // exact cPositionConstraints visibility / in-sector gating is not reproduced.
+    const int64_t want = 0x14000;   // 20.0 (Q12)
+    int bestA = -1, bestB = -1; int64_t bestErr = INT64_MAX; int32_t centre[3]{};
+    for (int i = 0; i < rn.count(); ++i) {
+        const auto& na = rn.node(i);
+        if ((na.flags & 0x800) || na.z < -4) continue;
+        int32_t A[3]; rn.pos(i, A);
+        if (std::llabs((int64_t)A[0] - playerPos[0]) > 0x40000 || std::llabs((int64_t)A[1] - playerPos[1]) > 0x40000)
+            continue;   // a ~64-unit box around the player
+        for (int k = 0; k < rn.linkCount(i); ++k) {
+            const int j = rn.link(i, k);
+            if (j < 0 || j >= rn.count()) continue;
+            const auto& nb = rn.node(j);
+            if ((nb.flags & 0x800) || nb.z < -4) continue;
+            int32_t B[3]; rn.pos(j, B);
+            const int64_t abx = B[0] - A[0], aby = B[1] - A[1], abz = B[2] - A[2];
+            const int64_t len2 = abx * abx + aby * aby + abz * abz;
+            if (!len2) continue;
+            double f = (double)((int64_t)(playerPos[0] - A[0]) * abx + (int64_t)(playerPos[1] - A[1]) * aby +
+                                (int64_t)(playerPos[2] - A[2]) * abz) / (double)len2;
+            f = std::clamp(f, 0.0, 1.0);
+            const int32_t P[3] = {(int32_t)(A[0] + f * abx), (int32_t)(A[1] + f * aby), (int32_t)(A[2] + f * abz)};
+            int64_t d2 = 0; for (int t = 0; t < 3; ++t) { const int64_t d = (int64_t)P[t] - playerPos[t]; d2 += d * d; }
+            const int64_t err = std::llabs((int64_t)std::sqrt((double)d2) - want);
+            if (err < bestErr) { bestErr = err; bestA = i; bestB = j; std::copy(P, P + 3, centre); }
+        }
+    }
+    if (bestA < 0 || bestErr > want) return false;   // no road ~20 units ahead (within a 0..40-unit band)
+
+    int32_t A[3], B[3]; rn.pos(bestA, A); rn.pos(bestB, B);
+    int32_t dir[3] = {B[0] - A[0], B[1] - A[1], B[2] - A[2]};
+    Normalise3(dir);
+    if (!isAreaClearForRoadBlock(g, centre, 0x8000)) return false;   // side 8.0 (Q12)
+
+    const int lanes = std::max(1, rn.meta(bestA).lanes);   // sNodeMetaData lane count (1 or 2)
+    const uint32_t t = g.world.timeCycle().time();
+    const ZoneInfo& z = zoneOrDefault(centre[0], centre[1], t - 0x14000u < 0xFFFF3000u);
+    const int driverSubtype = copSubType(g);
+    const int16_t carHeading = headingOf(dir[1], -dir[0]);   // the car sits across the road (facing right)
+    const int16_t copHeading = headingOf(dir[0], dir[1]);    // the cops face along the road
+    bool placed = false;
+    for (int lane = 0; lane < lanes; ++lane) {
+        const RoadBlockUnit u = roadBlockUnit(centre, dir, lanes, lane);
+        if (g.cars.size() < 1024) {
+            // cPopulationManager::CreateRandomCar(0x12) + cVehicle::SetVehiclePedType(0xA): a police car with a cop
+            // driver, placed across the road. Its enforcer AI (Traffic::enforce) drives it once registered here.
+            const int idx = g.spawnCar(0x12, u.car, carHeading, -1);
+            if (idx >= 0) {
+                Vehicle& v = g.cars[idx];
+                v.generated = true;
+                v.engineOn = true;
+                v.setToPhysics(false);
+                if (g.peds.createDriver(g, v, 10, z, driverSubtype)) {
+                    Driver d;
+                    d.cop = true;
+                    d.speed = 0;   // holds position until enforce() takes it under physical pursuit
+                    d.lastFrame = g.frame;
+                    d.spline.set(rn, bestA, bestB, 0, std::min(lane, 5), 6, true, (int)(v.uid & 0xFF));
+                    drivers_[v.uid] = d;
+                    placed = true;
+                } else {
+                    g.removeCar(idx);
+                }
+            }
+        }
+        // cRoadBlocks::CreateCop twice: two cops on foot, behind the car and flanking it.
+        g.peds.spawnRoadBlockCop(g, z, u.copA, copHeading, 0);
+        g.peds.spawnRoadBlockCop(g, z, u.copB, copHeading, 0);
+    }
+    return placed;
+}
+
+void Traffic::updateRoadBlocks(Game& g) {
+    if (roadBlockCooldown_) --roadBlockCooldown_;
+    // ASSUMPTION: the wanted threshold that dispatches cRoadBlocks::AddRoadBlock is reached through indirect dispatch
+    // and was not statically verifiable. Road blocks are a higher-wanted police unit and (per cWantedManager::Process)
+    // only occur while the player drives, so the port gates on wanted level >= 3 in a vehicle. The cadence is likewise
+    // an approximation (a fixed cooldown), not a confirmed constant.
+    if (roadBlockCooldown_ || g.playerCar < 0 || g.wanted.level() < 3 || !g.roads.ok()) return;
+    int32_t playerPos[3];
+    g.focus(playerPos);
+    if (spawnRoadBlock(g, playerPos)) roadBlockCooldown_ = 900;   // ~30 s at 30 fps (assumption)
+}
+
 void Traffic::update(Game& g) {
+    updateRoadBlocks(g);   // may add cop cars / peds before the per-car work below
     // Physics activation starts rejoining; it does not remove the seated driver's road task.
     for (auto it = drivers_.begin(); it != drivers_.end();) {
         bool keep = false;

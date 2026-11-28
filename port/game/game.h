@@ -9,6 +9,9 @@
 #include "followcam.h"
 #include "gamehud.h"
 #include "mapscreen.h"
+#include "pda.h"
+#include "pdastats.h"
+#include "uitext.h"
 #include "localarea.h"
 #include "peds.h"
 #include "pausescreen.h"
@@ -42,6 +45,8 @@
 #include "sinkingcar.h"
 #include "devmenu.h"
 #include "hotwiring.h"
+#include "safecrackingview.h"
+#include "drugvanslashview.h"
 #include "doors.h"
 #include "garages.h"
 #include "markers.h"
@@ -73,6 +78,14 @@ public:
     MapScreen mapScreen;                     // the full-screen cMapApp map (toggled with M)
     void openMap();                          // build (once) + open the big map on the player
     bool mapKey(int scancode);               // pan/zoom/close while the big map is open
+    pda::Pda pda;                            // the PDA shell (Gui::cPda)
+    PdaStatsApp pdaStats;                    // the Stats app hosted in the PDA
+    bool pdaOpen_ = false;
+    void openPda();                          // open the PDA on the Stats app (toggled with P)
+    void closePda();
+    bool pdaKey(int scancode);               // drive the current app / close while the PDA is open
+    void cyclePdaApp();                      // Tab: cycle Stats -> Map -> Contacts
+    std::u16string pdaGxt(uint16_t id) const; // PDA text: e_main.gxt, else a neutral "#id" (no baked strings)
 
     WorldRenderer world;
     Collision collision;
@@ -290,6 +303,14 @@ public:
     // cHotWire's record: the vehicle types learnt and the successes a class (at most 15); a mission's
     // ScriptPlayer::WhenSucceedsHotwire / WhenFailsHotwire (onHotwire) and SuppressHotwireTimelimit
     HotWiring hotwiring;
+    // dev-menu visual minigames (PC addition): the ported safe-cracking / drug-van-slash logic drawn with the game's
+    // own loaded sprites, started from the dev menu's Minigames+ page.
+    SafeCrackingView safeCrack;
+    DrugVanSlashView drugVanSlash;
+    void startSafeCrack();
+    void startDrugVanSlash();
+    bool safeCrackOn_ = false;    // the safe-cracking view is active (its logic exposes no active() flag of its own)
+    bool mgPrevDown_ = false;     // the previous mouse-button state, to turn the mouse into down/move/up for a view
     // cMinigameCam: the active camera while a minigame has it (it replaces the driving camera)
     MinigameCam minigameCam;
     void startMinigameCam(int32_t scale);   // cHotWiringApp::Init_*Mode: along the view's right vector
@@ -433,6 +454,7 @@ private:
     int deathFrames_ = -1;          // frames since the player died (the death paths set it to 0 with the camera)
     bool deathStarted_ = false;     // updateDeath has seen this death
     std::vector<std::u16string> mainText_;   // e_main.gxt
+    UiText uiText_;                          // e_stats.gxt: the PDA Stats labels (StatsText, id >= 0x52E)
     int32_t deathEye_[3] = {}, restartFallback_[3] = {};
     uint16_t deathYaw_ = 0, deathPitch_ = 0;
     bool deathCameraSettled_ = false;

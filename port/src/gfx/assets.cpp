@@ -31,6 +31,7 @@ static int g_effectTexture = -1;
 static std::vector<std::array<uint16_t, 4>> g_effectRects;
 static int g_pickupTexture = -1;
 static std::vector<std::array<uint16_t, 4>> g_pickupRects;
+static uint16_t g_pdaThemeTableResId = 0xFFFF;   // gGameDir[26] (resource 0, byte 0x34); 0xFFFF = unavailable
 
 bool Assets_Open(const std::string& dataDir) {
     if (g_open) return true;
@@ -43,6 +44,8 @@ bool Assets_Open(const std::string& dataDir) {
     uint16_t gameDir[28];
     if (g_pak.read(0, directory) && directory.size() >= sizeof gameDir) {
         std::memcpy(gameDir, directory.data(), sizeof gameDir);
+        // cPdaTheme::SetupBG (0x7ab540) reads gGameDir+0x34 (u16 index 26) as the PDA theme texture-id table id.
+        g_pdaThemeTableResId = gameDir[26];
         // cAssetManager (gGameDir[9]): u16 texture id, u16 pad, then 26 sprite rects {u16 x, y, w, h}. The resource
         // is padded to whole pages, so its size says nothing about the number of rects.
         const size_t kSprites = 26, kEnd = 4 + kSprites * 8;
@@ -72,6 +75,7 @@ bool Assets_Open(const std::string& dataDir) {
 }
 
 Pak& Assets_Pak() { return g_pak; }
+uint16_t Assets_PdaThemeTableResId() { return g_open ? g_pdaThemeTableResId : (uint16_t)0xFFFF; }
 const RenderTables& Assets_RenderTables() { return g_renderTables; }
 bool Assets_EffectSprite(int sprite, int& texture, uint16_t rect[4]) {
     if (g_effectTexture < 0 || g_effectRects.empty()) return false;

@@ -158,6 +158,27 @@ int Sound::addEvent(Entity& e, int event, int volume, int radius, int sfx) {   /
     return -1;
 }
 
+int Sound::computeVolume(int volume, int radius, uint32_t d2) {   // cAudioManager::ComputeVolume
+    if (radius < 1 || d2 > 100000u) return 0;
+    uint32_t R = (uint32_t)radius;
+    if (d2 > R) return 0;
+    uint32_t near = R * 0x333u >> 12;   // 0.2 x radius: full volume inside this
+    if (d2 < near) return volume;
+    int k = (int)(R - near) ? (int)(((R - d2) * 0x1000u) / (R - near)) : 0;
+    k = std::max(k, 0);
+    return ((k * k) >> 12) * volume >> 12;
+}
+
+int Sound::computePan(float lx, float lz) {   // cAudioManager::ComputePan
+    int32_t zq = (int32_t)(lz * 4096.f) >> 12;
+    if (zq < 0x24) zq = 0x24;
+    if (zq > 0x198) return 0x3F;
+    int32_t k = (int32_t)(0x100000000000LL / (int64_t)zq >> 12) & ~0xFF;
+    k = std::clamp(k, -0x1E000, 0x1E000);
+    int32_t x = std::clamp((int32_t)(lx * 4096.f), -0x14000, 0x14000);
+    return std::clamp((0x80 - ((int32_t)(((int64_t)k * x) >> 12) >> 13)) >> 1, 0, 0x7F);
+}
+
 void Sound::processEntity(Game& g, Entity& e, bool persistent) {   // cAudioManager::ProcessStandardSfx
     int32_t ear[3];
     g.focus(ear);
@@ -173,20 +194,7 @@ void Sound::processEntity(Game& g, Entity& e, bool persistent) {   // cAudioMana
             s = Slot{};
             continue;
         }
-        // cAudioManager::ComputeVolume
-        int vol = 0;
-        if (s.radius > 0 && d2 <= 100000) {
-            uint32_t R = (uint32_t)s.radius;
-            if (d2 <= R) {
-                uint32_t near = R * 0x333 >> 12;
-                if (d2 < near) vol = s.volume;
-                else {
-                    int k = (int)(R - near) ? (int)(((R - d2) * 0x1000) / (R - near)) : 0;
-                    k = std::max(k, 0);
-                    vol = ((k * k) >> 12) * s.volume >> 12;
-                }
-            }
-        }
+        int vol = computeVolume(s.volume, s.radius, d2);
         if (vol < 1) {   // inaudible: one-shots are dropped, loops stop until they come back in range
             if (ei.mode == 2) s.event = 0x9C;
             if (s.voice) { Audio_SfxStop(s.voice); s.voice = 0; }
@@ -194,20 +202,11 @@ void Sound::processEntity(Game& g, Entity& e, bool persistent) {   // cAudioMana
             s.active = false;
             continue;
         }
-        // cAudioManager::ComputePan (camera space; 0 left .. 127 right)
+        // camera-space projection; the fixed-point pan curve is cAudioManager::ComputePan
         float px = (e.pos[0] / 4096.f - cam.eye[0]), py = (e.pos[1] / 4096.f - cam.eye[1]), pz = (e.pos[2] / 4096.f - cam.eye[2]);
         float lx = px * cam.right[0] + py * cam.right[1] + pz * cam.right[2];
         float lz = px * cam.fwd[0] + py * cam.fwd[1] + pz * cam.fwd[2];
-        int32_t zq = (int32_t)(lz * 4096.f) >> 12;
-        int pan;
-        if (zq < 0x24) zq = 0x24;
-        if (zq > 0x198) pan = 0x3F;
-        else {
-            int32_t k = (int32_t)(0x100000000000LL / (int64_t)zq >> 12) & ~0xFF;
-            k = std::clamp(k, -0x1E000, 0x1E000);
-            int32_t x = std::clamp((int32_t)(lx * 4096.f), -0x14000, 0x14000);
-            pan = std::clamp((0x80 - ((int32_t)(((int64_t)k * x) >> 12) >> 13)) >> 1, 0, 0x7F);
-        }
+        int pan = computePan(lx, lz);
         if (ei.pan != -1) pan = ei.pan;
         float fpan = pan / 127.f * 2.f - 1.f;
         if (!s.voice) {   // cSoundEvents::StartSoundEvent

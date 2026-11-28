@@ -26,6 +26,12 @@ void Mission::tick(Game& game) {
     const unsigned gen = generation_;
     // the callbacks may add or cancel waits: run the due ones from copies
     std::vector<std::function<void()>> due;
+    // the mission clock counts with the frame (TimerImpl::Wait style): due the frame it reaches zero, then dropped
+    if (timerFrames_ >= 0 && --timerFrames_ <= 0) {
+        if (onTimer_) due.push_back(std::move(onTimer_));
+        timerFrames_ = -1;
+        onTimer_ = nullptr;
+    }
     for (size_t i = 0; i < waits_.size();) {
         if (--waits_[i].frames <= 0) { due.push_back(std::move(waits_[i].fn)); waits_.erase(waits_.begin() + i); }
         else ++i;

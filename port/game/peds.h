@@ -231,6 +231,11 @@ public:
     void generate(Game& g, const Traffic::ZoneInfo& z);
     void collect(Game& g);   // cWorld::GarbageCollection: peds in unloaded sectors are deleted
     bool createDriver(Game& g, Vehicle& car, int type, const Traffic::ZoneInfo& zone, int subtype = -1);
+    // cRoadBlocks::CreateCop (0x8f6cc0): a cop (ePedType 0xA) on foot at `pos` facing `heading`. The enforcer order,
+    // weapon 5 and the player target the native routine assigns are supplied by the on-foot police task (policeStep),
+    // which runs for every type-10 ped not in a vehicle. Returns the ped uid (0 on failure).
+    uint32_t spawnRoadBlockCop(Game& g, const Traffic::ZoneInfo& zone, const int32_t pos[3], int16_t heading,
+                               int subtype = 0);
     bool exitOccupant(Game& g, Vehicle& car, int seat, bool forgetTraffic = true); // true when the seat is free
     // cPed::HandleReaction in a vehicle for fleeing (cFleeOnFoot from the threat): out of the vehicle, then flee
     // from `from` (following fromCar while it exists)

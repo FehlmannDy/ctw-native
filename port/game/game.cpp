@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
 #include "game.h"
+#include "pdamap.h"
+#include "pdacontacts.h"
 #include "loadingscreen.h"
 #include "intro.h"
 #include "weaponhud.h"
@@ -108,6 +110,9 @@ bool Game::init(const std::string& data, const std::string& mods) {
         if (text.load(dataDir + "/e_main.gxt"))
             for (size_t i = 0; i < text.count(); ++i) mainText_.push_back(text.get(i));
     }
+    uiText_.load(dataDir);   // e_stats.gxt: the PDA Stats labels (optional; pdaGxt falls back to "#id" if absent)
+    pda.loadTheme(dataDir);  // SS_PdaSprites: the PDA app-title banner art (optional; themeLoaded() gates its use)
+    pda.loadBody(dataDir, Assets_PdaThemeTableResId());   // the PDA device body: the theme's bezel DXT from game.pak
     if (!deathScreen.init(dataDir))
         fprintf(stderr, "shard_tables.bin missing or invalid: death fades to black (run scripts/setup_game.py)\n");
     if (!wanted.init(dataDir))
@@ -1445,6 +1450,11 @@ void Game::tick() {
     sinkingCar.process(frame);
     updateHotwire();
     hotwiring.process(frame, world.timeCycle().time() / 4096.f);
+    if (safeCrackOn_) safeCrack.game().process();   // dev-menu visual minigames step their headless logic each frame
+    if (drugVanSlash.active()) {
+        drugVanSlash.process();
+        if (drugVanSlash.game().isFinished()) { drugVanSlash.stop(); restoreCam(); }
+    }
     gameplayHud.process(*this);   // (this frame's HUD state, as the game left it last frame)
     for (auto& c : contrails) c->process(frame);
     if (mission) {
@@ -1871,6 +1881,30 @@ void Game::render(int W, int H) {
         Host_GetMouse(&mx, &my);
         if (!pauseOpen && Plugins_HostApi().mouse_clicked(0)) sinkingCar.press((float)mx, (float)my, W, H);
     }
+    if (safeCrackOn_) {   // dev-menu visual safe-cracking: the dial over the world, the mouse is the touch
+        safeCrack.render(W, H);
+        int mx, my;
+        Host_GetMouse(&mx, &my);
+        if (!pauseOpen) {
+            const bool down = Host_MouseDown(0) != 0;
+            if (down && !mgPrevDown_) safeCrack.onMouseDown(mx, my);
+            else if (down) safeCrack.onMouseMove(mx, my);
+            else if (mgPrevDown_) safeCrack.onMouseUp(mx, my);
+            mgPrevDown_ = down;
+        }
+    }
+    if (drugVanSlash.active()) {   // dev-menu visual drug-van-slash: swipe the mouse to cut
+        drugVanSlash.render(W, H);
+        int mx, my;
+        Host_GetMouse(&mx, &my);
+        if (!pauseOpen) {
+            const bool down = Host_MouseDown(0) != 0;
+            if (down && !mgPrevDown_) drugVanSlash.onMouseDown(mx, my, W, H);
+            else if (down) drugVanSlash.onMouseMove(mx, my, W, H);
+            else if (mgPrevDown_) drugVanSlash.onMouseUp(mx, my, W, H);
+            mgPrevDown_ = down;
+        }
+    }
     renderMissionHud(W, H);     // the screen fade and the objective line
 
     Hud_Begin(W, H);
@@ -1884,6 +1918,15 @@ void Game::render(int W, int H) {
     renderPause(W, H);
     Hud_End();
     if (mapScreen.isOpen()) mapScreen.render(*this, W, H);   // the full-screen cMapApp map, over the HUD
+    if (pdaOpen_) {   // the PDA shell (Gui::cPda) hosting the Stats app, in the PDA's 1024x768 space
+        const float tod = Plugins_HostApi().get_time_of_day();
+        const int hour = (int)tod, minute = (int)((tod - (float)hour) * 60.f);
+        pda.process(minute, hour);
+        Hud_Begin(1024, 768);
+        Hud_Rect(0.f, 0.f, 1024.f, 768.f, 0x0A1420F0u);   // dark PDA backdrop over the frozen world
+        pda.render(1024, 768);
+        Hud_End();
+    }
     if (!pauseOpen) devMenu.render(*this, W, H);   // F3, over everything but the pause screen
     restoreInterpolation();
 }
@@ -1953,17 +1996,121 @@ bool Game::mapKey(int k) {   // the full-screen map is open: pan/zoom, or close
     }
 }
 
+namespace {
+constexpr int kAppStats = 0x30;      // a port id for the Stats app (distinct from the binary's HUD/map ids)
+constexpr int kAppContacts = 0x4b;   // ePdaApp placeholder for Contacts (Lane 2)
+
+// Hosts PdaStatsApp inside the Lane-1 PDA shell: forwards the shell's app lifecycle to the Stats component.
+class StatsPdaApp : public pda::PdaApp {
+public:
+    StatsPdaApp(int id, Game& g) : pda::PdaApp(id), game_(g) {}
+    void onProcess() override { game_.pdaStats.process(1.f / 30.f); }
+    void onRender(int, int) const override { game_.pdaStats.render(ContentArea{}); }
+private:
+    Game& game_;
+};
+}  // namespace
+
+std::u16string Game::pdaGxt(uint16_t id) const {
+    std::u16string s = mainText(id);   // e_main.gxt resolves GlobalText ids (< 0x52E)
+    if (!s.empty()) return s;
+    s = uiText_.statsText(id);          // e_stats.gxt resolves the PDA Stats labels (StatsText, id >= 0x52E)
+    if (!s.empty()) return s;
+    // ids still unmapped (e.g. contact-name callbacks): a neutral "#id" key, no baked text.
+    char buf[8];
+    const int n = std::snprintf(buf, sizeof buf, "%u", (unsigned)id);
+    std::u16string key(1, u'#');
+    for (int i = 0; i < n; ++i) key.push_back((char16_t)buf[i]);
+    return key;
+}
+
+void Game::openPda() {
+    static SaveProgress save;
+    save = saveGame.progress();   // the live SaveProgress from the loaded save (medals, race times, cams, safehouses)
+    pdaStats.init(&stats, &save, [this](uint16_t id) { return pdaGxt(id); });
+    pdaStats.setCategory(StatsCategory::General);
+    pdaStats.setMedalSheet(&gameplayHud.alwaysLoaded(), gameplayHud.alwaysLoadedTexture(),
+                           gameplayHud.alwaysLoadedWidth(), gameplayHud.alwaysLoadedHeight());   // medal art (SS_AlwaysLoaded)
+    static bool inited = false;
+    if (!inited) { pda.init(); inited = true; }
+    // the PDA frame graphic draws from the HUD's always-loaded sheet (SS_AlwaysLoaded id 0x79), by id at run time
+    pda.setFrameSprites(&gameplayHud.alwaysLoaded(), gameplayHud.alwaysLoadedTexture(),
+                        gameplayHud.alwaysLoadedWidth(), gameplayHud.alwaysLoadedHeight());
+    pda.setScreenMetrics((int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());   // cPda::RenderPhoneSurround bars
+    pda.appFactory = [this](int id, pda::ResetOption) -> std::unique_ptr<pda::PdaApp> {
+        if (id == pda::kAppMap)
+            return std::make_unique<MapPdaApp>(gameplayHud.radarMap(), *this, (int)pda::kAppMap);
+        if (id == kAppContacts) {
+            auto c = std::make_unique<pdacontacts::ContactsPdaApp>(kAppContacts);
+            c->init(0, [this](uint16_t t) { return pdaGxt(t); }, {}, {});   // no contact source yet -> placeholders
+            c->loadSheet(dataDir);   // SS_Contacts: the contact avatar art (your own extracted sheet)
+            return c;
+        }
+        return std::make_unique<StatsPdaApp>(id, *this);
+    };
+    pda.enable(true, true);
+    pda.openHome();   // open to the app gallery (home), not straight into Stats
+    pdaOpen_ = true;
+}
+
+void Game::closePda() { pdaOpen_ = false; }
+
+void Game::cyclePdaApp() {   // Tab: Stats -> Map -> Contacts -> Stats
+    const int order[3] = {kAppStats, (int)pda::kAppMap, kAppContacts};
+    int idx = 0;
+    for (int i = 0; i < 3; ++i) if (order[i] == pda.targetApp()) idx = i;
+    pda.loadApp(order[(idx + 1) % 3]);
+}
+
+bool Game::pdaKey(int k) {   // the PDA is open: switch app (Tab), drive the current app, or close
+    if (pda.homeOpen()) {   // the app gallery (home) has the keyboard
+        if (k == SDL_SCANCODE_P || k == SDL_SCANCODE_ESCAPE) { closePda(); return true; }
+        pda.galleryInput(k);   // arrows/WASD move the selection, Enter opens the app
+        return true;
+    }
+    if (k == SDL_SCANCODE_P) { closePda(); return true; }               // close the PDA
+    if (k == SDL_SCANCODE_ESCAPE) { pda.returnToHome(); return true; }   // Back -> the app gallery
+    if (k == SDL_SCANCODE_TAB) { cyclePdaApp(); return true; }
+    if (pda.targetApp() == kAppStats) {
+        switch (k) {
+        case SDL_SCANCODE_LEFT:  case SDL_SCANCODE_A: pdaStats.input(PdaStatsApp::Input::PrevCategory); break;
+        case SDL_SCANCODE_RIGHT: case SDL_SCANCODE_D: pdaStats.input(PdaStatsApp::Input::NextCategory); break;
+        case SDL_SCANCODE_UP:    case SDL_SCANCODE_W: pdaStats.input(PdaStatsApp::Input::ScrollUp);   break;
+        case SDL_SCANCODE_DOWN:  case SDL_SCANCODE_S: pdaStats.input(PdaStatsApp::Input::ScrollDown); break;
+        default: break;
+        }
+        return true;
+    }
+    if (pda.targetApp() == (int)pda::kAppMap) {
+        if (auto* m = dynamic_cast<MapPdaApp*>(pda.app())) {   // pan / wheel-style zoom on the hosted map
+            switch (k) {
+            case SDL_SCANCODE_W: case SDL_SCANCODE_UP:    m->screen().pan(0.f,  60.f); break;
+            case SDL_SCANCODE_S: case SDL_SCANCODE_DOWN:  m->screen().pan(0.f, -60.f); break;
+            case SDL_SCANCODE_A: case SDL_SCANCODE_LEFT:  m->screen().pan( 60.f, 0.f); break;
+            case SDL_SCANCODE_D: case SDL_SCANCODE_RIGHT: m->screen().pan(-60.f, 0.f); break;
+            case SDL_SCANCODE_PAGEUP:   case SDL_SCANCODE_EQUALS: m->screen().zoomBy(1.25f); break;
+            case SDL_SCANCODE_PAGEDOWN: case SDL_SCANCODE_MINUS:  m->screen().zoomBy(0.8f);  break;
+            default: break;
+            }
+        }
+        return true;
+    }
+    return true;   // Contacts (placeholder rows): no interaction yet
+}
+
 bool Game::key(int k) {
     if (pauseOpen) return pauseKey(k);
     if (k == SDL_SCANCODE_F3 && !devMenu.open() && Plugins_GameInput()) { devMenu.toggle(); return true; }
     if (devMenu.open()) return devMenu.key(*this, k);   // the menu has the keyboard
     if (mapScreen.isOpen()) return mapKey(k);           // the full-screen map has the keyboard while open
+    if (pdaOpen_) return pdaKey(k);                     // the PDA has the keyboard while open
     if (WeaponHud_WheelOpen() && WeaponHud_Key(*this, k)) return true;   // (an open wheel closes on Escape)
     // the mods first: a focused text field (chat, a search box) takes the key, and while a mod has the keyboard
     // nothing reaches the game (no cutscene skip, no weapon wheel, no Enter getting into a car)
     if (Plugins_Key(k)) return true;   // (an open mod menu closes on Esc here)
     if (!Plugins_GameInput()) return true;
     if (k == SDL_SCANCODE_M) { openMap(); return true; }   // open the full-screen cMapApp map
+    if (k == SDL_SCANCODE_P) { openPda(); return true; }   // open the PDA (Stats app)
     if (cutsceneKey(k)) return true;
     if (hotwiring.active() && (k == SDL_SCANCODE_F || k == SDL_SCANCODE_RETURN)) {   // the vehicle button
         hotwiring.quit();   // (cPlayerInVehicleHotwire: it gives up and gets out)
@@ -1973,6 +2120,8 @@ bool Game::key(int k) {
         if (k == SDL_SCANCODE_Q || k == SDL_SCANCODE_E) sinkingCar.shoulder(k == SDL_SCANCODE_E);
         if (k != SDL_SCANCODE_ESCAPE) return true;
     }
+    if (safeCrackOn_) { if (k == SDL_SCANCODE_ESCAPE) { safeCrackOn_ = false; restoreCam(); } return true; }
+    if (drugVanSlash.active()) { if (k == SDL_SCANCODE_ESCAPE) { drugVanSlash.stop(); restoreCam(); } return true; }
     if (k == SDL_SCANCODE_ESCAPE && !radio.appOpen()) { setPause(true); return true; }
     if (radio.key(k, *this)) return true;
     if (WeaponHud_Key(*this, k)) return true;
@@ -2036,6 +2185,24 @@ void Game::playerFollowPoint(int32_t out[3]) const {   // cPed::ActThroughVehicl
 
 // cMinigameCam(gPlayers[0], the active camera's +0xB8 position, its +0x94 row (the right vector), scale, false),
 // then cCamera::SwitchToCam(.., 1, true, false): TweenFrom keeps the outgoing camera's angles and blocked count
+void Game::startSafeCrack() {   // dev-menu Minigames+: start the visual safe-cracking over the world
+    if (!safeCrack.loaded()) safeCrack.load(dataDir);
+    safeCrack.game().playSfx = [](int sample, int volume) { TheSound().playHud(sample, volume); };
+    safeCrack.game().onFinished = [this] { safeCrackOn_ = false; restoreCam(); };
+    safeCrack.game().start(3, 6, 1);   // a fixed combination for testing
+    safeCrackOn_ = true;
+    mgPrevDown_ = false;
+    startMinigameCam(0xA000);
+}
+
+void Game::startDrugVanSlash() {   // dev-menu Minigames+: start the visual drug-van-slash over the world
+    if (!drugVanSlash.backgroundsLoaded()) drugVanSlash.load(dataDir);
+    drugVanSlash.playSfx = [](int sample, int volume) { TheSound().playHud(sample, volume); };
+    drugVanSlash.start(drugvanslash::VanKind::Drugs, 0, 1);
+    mgPrevDown_ = false;
+    startMinigameCam(0xA000);
+}
+
 void Game::startMinigameCam(int32_t scale) {
     int32_t eye[3], at[3];
     uint16_t yaw, pitch;

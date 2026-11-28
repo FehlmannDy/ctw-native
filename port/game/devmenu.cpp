@@ -6,15 +6,30 @@
 #include "hud.h"
 #include "plugins.h"
 #include "porterui.h"
+#include "shops.h"
+#include "safecracking.h"
+#include "bombdisposal.h"
+#include "emptytheboot.h"
+#include "drugvanslash.h"
 #include "sound.h"
 #include "os/os.h"
 #include <SDL.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 namespace {
 std::string onOff(bool v) { return v ? "on" : "off"; }
+
+// A Game-backed wallet for the drug market (ctw::IWallet binds to the player's money, cPlayer::Give/TakeMoney).
+struct GameWallet : ctw::IWallet {
+    Game& g;
+    explicit GameWallet(Game& game) : g(game) {}
+    int32_t money() const override { return g.money; }
+    void giveMoney(uint32_t amount) override { g.giveMoney(amount); }
+    void takeMoney(uint32_t amount) override { g.takeMoney(amount); }
+};
 
 // the first mission's places, for jumping about while testing it
 struct Place { const char* name; float x, y; };
@@ -196,6 +211,105 @@ void DevMenu::build(Game& g) {
                 g.world.loadAllNow(p.x, p.y);
                 status_ = std::string("Moved to ") + p.name + ".";
             });
+        break;
+    }
+    case 6: {   // Economy (dev): the Ammu-Zone store and the drug market, wired for testing in-game
+        if (!marketReady_) {   // seed the drug market once: one commodity per price tier (prices injected here)
+            market_.addCommodity(0, ctw::DrugTier::Cheap, 50);
+            market_.addCommodity(0, ctw::DrugTier::Mid, 300);
+            market_.addCommodity(0, ctw::DrugTier::Expensive, 800);
+            marketReady_ = true;
+        }
+        Row money;
+        money.label = "Money";
+        money.value = [&g] { return "$" + std::to_string(g.money); };
+        rows_.push_back(std::move(money));
+        action("Give $10,000", [this, &g] { g.giveMoney(10000); status_ = "Gave $10,000."; });
+
+        // Ammu-Zone (cAmmozoneApp): a one-item shop, add it to the basket, pay (MakePurchase) and deliver the
+        // weapon (deliverOrder). The original defers delivery to cAmmoZoneTruck; here it is immediate so it is testable.
+        auto buy = [this, &g](int weaponType, uint16_t price, const char* name) {
+            shop::Shop store;
+            store.addItem(shop::ShopItem{weaponType, price, true, false});
+            shop::ShopSession s(store, g.money);
+            const shop::ShopItem* it = store.item(0);
+            if (!it || !s.add(*it)) { status_ = std::string("Ammu-Zone: can't afford the ") + name + "."; return; }
+            const int before = g.money;
+            const uint32_t charged = shop::makePurchase(s, g);
+            const int lots = shop::deliverOrder(s, g);
+            status_ = std::string("Ammu-Zone: ") + name + " for $" + std::to_string(charged) + " ($"
+                    + std::to_string(before) + " -> $" + std::to_string(g.money) + "), " + std::to_string(lots) + " delivered.";
+        };
+        action("Ammu-Zone: buy a pistol ($300)", [buy] { buy(5, 300, "pistol"); });
+        action("Ammu-Zone: buy an SMG ($900)", [buy] { buy(9, 900, "SMG"); });
+
+        // Drug market (cStockMarket + cTradeManager): buy/sell the mid-tier commodity and tick the prices.
+        Row drug;
+        drug.label = "Drug (mid tier): price / held";
+        drug.value = [this] {
+            return "$" + std::to_string(market_.commodity(1).standardPrice) + " / " + std::to_string(market_.quantityOf(1));
+        };
+        rows_.push_back(std::move(drug));
+        action("Drug market: buy 1 unit", [this, &g] {
+            GameWallet w(g);
+            const int price = market_.commodity(1).standardPrice;
+            status_ = market_.buy(w, 1, 1, price) ? "Bought 1 unit for $" + std::to_string(price) + "."
+                                                  : "Can't buy (no money or stash full).";
+        });
+        action("Drug market: sell 1 unit", [this, &g] {
+            GameWallet w(g);
+            const int price = market_.commodity(1).standardPrice;
+            status_ = market_.sell(w, 1, 1, price) ? "Sold 1 unit for $" + std::to_string(price) + "."
+                                                   : "Nothing to sell.";
+        });
+        action("Drug market: tick prices", [this] {
+            market_.updatePrices([](int lo, int hi) { return lo + (hi > lo ? std::rand() % (hi - lo + 1) : 0); });
+            status_ = "Prices ticked.";
+        });
+        break;
+    }
+    case 7: {   // Minigames+ (dev): run each ported minigame's LOGIC to completion. No visuals (render not ported) -
+                // these drive the state machine and report the outcome, proving the ported code runs in the build.
+        Row note;
+        note.label = "Logic only - no on-screen minigame (sprites/UI are unported hooks)";
+        rows_.push_back(std::move(note));
+
+        action("Safe-cracking (play - drag the dial, Esc to close)", [this, &g] { open_ = false; g.startSafeCrack(); });
+
+        action("Bomb disposal: cut the correct wire", [this] {
+            BombDisposal bd;
+            bd.start([] { return 1; });   // correct wire = 1
+            for (int i = 0; i < BombDisposal::kScrews; ++i) bd.turnScrew();
+            for (int i = 0; i < 6 && !bd.cutting(); ++i) bd.processReveal();
+            bool win = false;
+            if (bd.cutting()) { bd.setSelected(bd.correctWire()); win = bd.cutSelected(); }
+            status_ = win ? "Bomb disposal: DEFUSED (finishCode " + std::to_string(bd.finishCode()) + ")."
+                          : "Bomb disposal: failed (phase " + std::to_string(bd.phase()) + ").";
+        });
+        action("Bomb disposal: cut a WRONG wire", [this] {
+            BombDisposal bd;
+            bd.start([] { return 1; });
+            for (int i = 0; i < BombDisposal::kScrews; ++i) bd.turnScrew();
+            for (int i = 0; i < 6 && !bd.cutting(); ++i) bd.processReveal();
+            bool win = true;
+            if (bd.cutting()) { bd.setSelected(bd.correctWire() == 0 ? 1 : 0); win = bd.cutSelected(); }
+            status_ = !win ? "Bomb disposal: BOOM - wrong wire, as expected." : "Bomb disposal: unexpected win.";
+        });
+
+        action("Empty the boot: empty + torch", [this] {
+            etb::EmptyTheBoot e;
+            e.start();
+            e.swipeOpen(etb::EmptyTheBoot::kOpenDragMagMin, 1, etb::EmptyTheBoot::kOpenAngleMax);
+            e.process();
+            e.process();
+            for (int i = 0; i < etb::EmptyTheBoot::kPapers; ++i) e.dropPaper();
+            e.process();
+            e.scrapeMatch(etb::EmptyTheBoot::kScrapeDistMin + 1, 1);
+            for (int i = 0; i < 300 && !e.finished(); ++i) e.process();
+            status_ = e.finished() ? "Empty the boot: burned (success)." : "Empty the boot: stuck.";
+        });
+
+        action("Drug van slash (play - swipe to cut, Esc to close)", [this, &g] { open_ = false; g.startDrugVanSlash(); });
         break;
     }
     }

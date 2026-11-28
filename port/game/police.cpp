@@ -161,6 +161,23 @@ bool Pedestrians::policeStep(Game& g, Ped& p) {
     return true;
 }
 
+// cRoadBlocks::CreateCop (0x8f6cc0): CreateRandomPed(type 0xA, subtype 0), position and face the road, then the
+// native routine attaches a cEnforcerWanderRoads order (cSimpleMover::AddOrder), gives weapon 5 (pistol, ammo -1)
+// and sets the player as the target. In the port those three are the standing behaviour of any on-foot type-10 ped
+// (Pedestrians::policeStep), so creating and placing the cop is enough. Mirrors Pedestrians::spawn's finalisation.
+uint32_t Pedestrians::spawnRoadBlockCop(Game& g, const Traffic::ZoneInfo& zone, const int32_t pos[3], int16_t heading,
+                                        int subtype) {
+    if (records_.empty()) return 0;
+    Ped p;
+    if (!appearance(g, p, 10, zone, subtype)) return 0;
+    std::copy(pos, pos + 3, p.body.pos);
+    p.body.placeOnGround(&g.collision);
+    p.body.setHeading(heading);
+    const uint32_t uid = p.uid;
+    peds.push_back(std::move(p));
+    return uid;
+}
+
 bool Game::beginArrest(uint32_t cop) {
     if (arrested_ || player.dead || playerCar >= 0 || player.attached || !cop || restart_.police.empty()) return false;
     bool valid = false;

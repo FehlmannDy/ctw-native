@@ -34,10 +34,14 @@ private:
     void save(Game& game, bool forced);     // Save
     void doSave(Game& game, bool forced);   // DoSave and the app's SaveSlot
     void walkOut(Game& game);               // WalkoutDelay .. SaveFinished
+    // PC-port convenience (the original's safehouse garages are not ported): open the cGarage nearest the safehouse
+    // marker when the player drives up to it, close it when they leave. An approximation of the drive-in garage.
+    void updateCarGarage(Game& game);
 
     State state_ = kIdle;
     bool forced_ = false;   // +0x2A8
     int waitFrames_ = 0;
     int checkWait_ = 0;     // SaveCheck's 10 frames
+    int carGarage_ = -2;    // the cGarage nearest the marker: -2 unresolved, -1 none within range, else its index
     DoorHandler door_;
 };

@@ -16,6 +16,12 @@ bool Assets_EffectSprite(int sprite, int& texture, uint16_t rect[4]);
 // A pickup sprite (ePickupTexture 0..40) on the pickup sheet: its texture id and {x, y, w, h} in pixels
 bool Assets_PickupSprite(int sprite, int& texture, uint16_t rect[4]);
 unsigned Assets_Texture(int resourceId);        // 0 if the id has no texture data
+// The PDA theme texture-id TABLE resource id, read from the user's own game.pak the way the engine does.
+// cGame::Init (0x6e3f70) fills the 56-byte gGameDir object (0xdcea88 -> 0x1057810) with cResourceManager::Load(
+// id=0, &gGameDir, 0x38) -- i.e. resource 0 copied in place -- and cPdaTheme::SetupBG (0x7ab540) reads the u16 at
+// gGameDir+0x34 (u16 index 26) as that table's resource id. So this is gameDir[26] from resource 0. Returns 0xFFFF
+// (SetupBG's "no resource" sentinel) if game.pak is not open or the directory is too short.
+uint16_t Assets_PdaThemeTableResId();
 bool Assets_TextureSize(int resourceId, int* width, int* height);   // loads the texture if needed
 // Replaces a game texture with a PNG (mods). UVs are normalised, so any resolution works. A PNG with transparent
 // pixels is a layer instead: it is drawn over the game's texture (stretched to its size), and where it is

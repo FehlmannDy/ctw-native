@@ -3,6 +3,7 @@
 // See LICENSE in the repository root.
 #include "sound.h"
 #include "game.h"
+#include "pedcomments.h"
 #include "random.h"
 #include "audio/audio.h"
 #include "os/os.h"
@@ -42,10 +43,10 @@ bool Sound::commentAt(Game& game,uint32_t uid,int type,int volume,int radius,uin
     const uint64_t since=(uint64_t)now-history.time;
     if(timing.nextAllowed>=now || since<=timing.ownGap || (history.type==type && since<=timing.repeatGap) || range.count<=0)return false;
     const int sample=range.first+(uint16_t)Rand16NonCritical(range.count);
-    const int32_t* previous=range.count<5?commentTables_.recentSmall:commentTables_.recentLarge;
-    const int count=range.count<5?2:4;
-    if(std::find(previous,previous+count,sample)!=previous+count)return false;
-    for(const auto& voice:comments_)if(voice.active && voice.sample==sample)return false;
+    const bool small=range.count<5;
+    int activeSamples[2];int activeCount=0;
+    for(const auto& v:comments_)if(v.active)activeSamples[activeCount++]=v.sample;
+    if(pedcomment::isCommentInRecentMemory(commentTables_,sample,small,activeSamples,activeCount))return false;
     CommentVoice* voice=nullptr;
     for(auto& candidate:comments_)if(!candidate.active){voice=&candidate;break;}
     if(!voice)return false;
@@ -54,17 +55,14 @@ bool Sound::commentAt(Game& game,uint32_t uid,int type,int volume,int radius,uin
     if(slot<0)return false;
     *voice={true,uid,slot,sample,(uint64_t)now+2000};
     timing.nextAllowed=(uint64_t)now+timing.peerGap+Rand32NonCritical(timing.randomGap);
-    if(range.count>4) {
-        largeCommentCursor_=largeCommentCursor_==3?0:largeCommentCursor_+1;
-        commentTables_.recentLarge[largeCommentCursor_]=sample;
-    } else {
-        smallCommentCursor_=smallCommentCursor_==1?0:smallCommentCursor_+1;
-        commentTables_.recentSmall[smallCommentCursor_]=sample;
-    }
+    pedcomment::storeCommentInRecentMemory(commentTables_,smallCommentCursor_,largeCommentCursor_,sample,small);
     history={type,now};return true;
 }
 
 void Sound::updatePedComments(Game& game) {
+    // cPedComment::Process (0x6b3f14): once per frame, retire each of the two active comment voices when its
+    // audio slot has finished (event 0x9C) or its reservation deadline has passed (native 0x6b4030 / 0x6b4074).
+    // The port also drops entities whose ped has gone.
     const uint32_t now=(uint32_t)(OS_TimeAccurate()*1000.0);
     for(auto it=people_.begin();it!=people_.end();) {
         const Pedestrians::Ped* speaker=nullptr;
